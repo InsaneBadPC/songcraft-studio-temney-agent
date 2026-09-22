@@ -29,7 +29,7 @@ const bundleId =
 
 const env = {
   // App branding - update these values directly (do not use env vars)
-  appName: "SongCraft Studio",
+  appName: "SongCraft Studio 3.0",
   appSlug: "songcraft-studio",
   // Ikona je součástí sestavení v assets/images/icon.png.
   logoUrl: "",
