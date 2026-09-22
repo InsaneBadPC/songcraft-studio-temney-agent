@@ -16,9 +16,9 @@ import { useAuth } from "@/hooks/use-auth";
 import { useColors } from "@/hooks/use-colors";
 
 const SUGGESTIONS = [
-  { icon: "auto-awesome" as const, text: "Navrhni refrén podle mých textů", sub: "Analýza stylu + nálady" },
-  { icon: "album" as const, text: "Jaké album mám rozpracovat dál?", sub: "Přehled nedokončených" },
-  { icon: "image" as const, text: "Vytvoř prompt pro přebal", sub: "Pro Al generátor" },
+  { icon: "auto-awesome" as const, text: "Navrhni další krok pro můj kanál", sub: "Obsah, vydání a růst" },
+  { icon: "album" as const, text: "Které album mám rozpracovat dál?", sub: "Přehled mých materiálů" },
+  { icon: "image" as const, text: "Připrav artwork pro skladbu", sub: "Temney character bible + prompt" },
 ];
 
 type Conversation = { id: string; title: string; messages: StudioAssistantMessage[]; createdAt: number; updatedAt: number };
@@ -105,10 +105,10 @@ export default function AssistantScreen() {
 
   const listHeader = useMemo(() => (
     <>
-      <StudioHeader eyebrow="Experimentální větev" title="Asistent" />
+      <StudioHeader eyebrow="Temney Agent · bezpečný režim" title="Temney Agent" />
       <View style={[styles.notice, { backgroundColor: colors.surface, borderColor: "rgba(255,255,255,0.08)", shadowColor: "#000", shadowOpacity: 0.12, shadowRadius: 12, shadowOffset: { width: 0, height: 4 }, elevation: 4 }]}>
         <View style={[styles.noticeIcon, { backgroundColor: `${colors.primary}14`, borderColor: "rgba(255,255,255,0.08)" }]}><MaterialIcons name="privacy-tip" size={18} color={colors.primary} /></View>
-        <Text style={[styles.noticeText, { color: colors.muted }]}>Čte jen tvé texty, alba a skladby. Nic sám neupravuje. Ukládá posledních 5 konverzací lokálně.</Text>
+        <Text style={[styles.noticeText, { color: colors.muted }]}>Pracuje jen s tvými texty, alby a skladbami. Artwork připravuje jako návrh; veřejné akce ani změny účtu nikdy neprovede bez tvého potvrzení.</Text>
       </View>
       {isAuthenticated && conversations.length > 0 ? (
         <Animated.View entering={FadeInUp.duration(380)} style={styles.historyBlock}>
@@ -142,7 +142,7 @@ export default function AssistantScreen() {
               </Pressable>
             </Animated.View>
           ))}
-          <Text style={[styles.disclaimer, { color: colors.muted }]}>Bezplatný experiment • připraví prompt pro obal, tagy i popis</Text>
+          <Text style={[styles.disclaimer, { color: colors.muted }]}>Temney pipeline • motivy, artwork, metadata a publikační návrhy</Text>
         </View>
       ) : null}
     </>
@@ -199,7 +199,7 @@ export default function AssistantScreen() {
         />
         {error ? <Animated.View entering={FadeInDown.duration(300)} style={[styles.errorBox, { backgroundColor: "rgba(239,68,68,0.10)", borderColor: "rgba(239,68,68,0.22)" }]}><MaterialIcons name="error-outline" size={16} color={colors.error} /><Text style={[styles.errorText, { color: colors.error }]}>{error}</Text></Animated.View> : null}
         <View style={[styles.composer, { backgroundColor: colors.surface, borderColor: "rgba(255,255,255,0.08)", shadowColor: "#000", shadowOpacity: 0.16, shadowRadius: 16, elevation: 8, paddingBottom: insets.bottom ? 8 : 8 }]}>
-          <TextInput value={draft} onChangeText={setDraft} editable={!inputDisabled} multiline maxLength={1000} placeholder="Zeptej se na skladby, texty nebo alba…" placeholderTextColor={colors.muted} style={[styles.input, { color: colors.foreground }]} />
+          <TextInput value={draft} onChangeText={setDraft} editable={!inputDisabled} multiline maxLength={1000} placeholder="Zadej úkol pro Temney Agenta…" placeholderTextColor={colors.muted} style={[styles.input, { color: colors.foreground }]} />
           <Pressable onPress={() => void send()} disabled={!draft.trim() || inputDisabled} style={({ pressed }) => [styles.send, { backgroundColor: !draft.trim() || inputDisabled ? "rgba(255,255,255,0.08)" : colors.primary, opacity: pressed ? 0.9 : 1, transform: [{ scale: pressed && draft.trim() ? 0.97 : 1 }] }]}>
             <MaterialIcons name="arrow-upward" size={20} color={!draft.trim() || inputDisabled ? colors.muted : "#FFFFFF"} />
           </Pressable>
