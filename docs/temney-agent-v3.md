@@ -68,6 +68,4 @@ Každý serverový dotaz ověřuje JWT a filtruje `user_id`. Citlivé akce se za
 - ✅ Deployed (v3.0): `agent-orchestrator`, `youtube-publish`, `youtube-sync-stats` (verify_jwt off), `video-renderer-dispatch`. E2E prošlo (list_songs, extract_lyric_themes, generate_metadata, generate_song_artwork, render_video, schedule_publication, publish_to_youtube -> pending_confirmation).
 - ✅ Render worker ověřen (RUN_ONCE + WORK_DIR), MP4 v bucketu `songcraft`, řádky `agent_videos` → `ready`.
 - ✅ Plánovač: `.github/workflows/sync-youtube-stats.yml` (GitHub Actions cron 06:00 UTC + manual) volá `youtube-sync-stats`.
-- ⏳ `youtube_credentials` je zatím prázdné — `publish_to_youtube`/`youtube-publish` proto umí jen `pending_confirmation` (skutečný API upload přijde po dokončení OAuth souhlasu). OAuth aplikace `247649053132-…` je v Google **Testing#** módu → souhlas končí 403 `access_denied`. Postup:
-  1. Owner (insanebad2@gmail.com) v Google Cloud konzoli publikuje aplikaci (Auth → Audience → Publish app; nejdřív Branding: app name + support email → Save).
-  2. Spustit souhlas (CDP sn-oauth4.mjs), ověřit přes `channels?mine=true` kanál Temney, refresh token uložit do `youtube_credentials` (user_id Temney).
+- ⏳ **DOKONČENO 2026-09-22**: `youtube_credentials` naplněno pro Temney (`99dacb87-…`, channel `UCVBrh8BozfEz5SDltgsvGWw`, scopes `youtube`+`youtube.upload`). OAuth souhlas prošel přes test usera `insanebad2@gmail.com` (Testing mód: owner = kandidát, ale Google ho pustí až jako Test user). Refesh token ověřen, `youtube-publish` má funkční resumable upload.
