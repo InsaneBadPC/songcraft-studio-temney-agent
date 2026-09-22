@@ -4,7 +4,7 @@ import * as FileSystem from "expo-file-system/legacy";
 import * as IntentLauncher from "expo-intent-launcher";
 import { Platform } from "react-native";
 
-const REPO = "InsaneBadPC/songcraft-studio";
+const REPO = "InsaneBadPC/songcraft-studio-temney-agent";
 const RELEASES_API = `https://api.github.com/repos/${REPO}/releases?per_page=30`;
 const APK_MIME = "application/vnd.android.package-archive";
 const SKIPPED_VERSION_KEY = "songcraft.skippedUpdateVersion";
