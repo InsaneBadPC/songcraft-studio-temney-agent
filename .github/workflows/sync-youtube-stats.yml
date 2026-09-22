@@ -1,0 +1,21 @@
+name: Sync YouTube stats (daily)
+
+on:
+  schedule:
+    - cron: "0 6 * * *"
+  workflow_dispatch:
+
+jobs:
+  sync:
+    name: Call youtube-sync-stats
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Sync stats
+        run: |
+          curl -sS -o - -w "\nHTTP %{http_code}\n" \
+            -X POST "${{ secrets.SUPABASE_URL }}/functions/v1/youtube-sync-stats" \
+            -H "Authorization: Bearer ${{ secrets.SUPABASE_ANON_KEY }}" \
+            -H "apikey: ${{ secrets.SUPABASE_ANON_KEY }}" \
+            -H "Content-Type: application/json" \
+            -d '{}'
