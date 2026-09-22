@@ -12,6 +12,7 @@ const exec = promisify(execFile);
 const url = process.env.SUPABASE_URL;
 const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
 const bucket = "songcraft";
+const workRoot = process.env.WORK_DIR || "/tmp";
 const interval = Number(process.env.WORKER_INTERVAL_MS || 30000);
 if (!url || !key) throw new Error("SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are required");
 const headers = { apikey: key, Authorization: `Bearer ${key}`, "Content-Type": "application/json" };
@@ -20,7 +21,7 @@ async function request(endpoint, options = {}) { const response = await fetch(en
 async function signed(pathname) { const result = await request(`${url}/storage/v1/object/sign/${bucket}/${pathname.split("/").map(encodeURIComponent).join("/")}`, { method: "POST", body: JSON.stringify({ expiresIn: 900 }) }); return `${url}/storage/v1${result.signedURL}`; }
 async function download(file, target) { const response = await fetch(file); if (!response.ok) throw new Error(`Download failed ${response.status}`); await writeFile(target, Buffer.from(await response.arrayBuffer())); }
 async function processJob(job) {
-  const work = path.join("/tmp", `temney-${job.id}`); await mkdir(work, { recursive: true });
+  const work = path.join(workRoot, `temney-${job.id}`); await mkdir(work, { recursive: true });
   try {
     const songs = await request(api("sc_songs", `?select=id,title,cover_path&id=eq.${encodeURIComponent(job.song_id)}&user_id=eq.${encodeURIComponent(job.user_id)}`)); const song = songs?.[0]; if (!song) throw new Error("Song not found");
     const versions = await request(api("sc_audio_versions", `?select=storage_path,is_final,is_primary&song_id=eq.${encodeURIComponent(job.song_id)}&user_id=eq.${encodeURIComponent(job.user_id)}&order=is_final.desc,is_primary.desc&limit=1`)); const version = versions?.[0]; if (!version) throw new Error("No final audio version"); if (!song.cover_path) throw new Error("No artwork");
@@ -31,5 +32,5 @@ async function processJob(job) {
   } catch (error) { const message = error instanceof Error ? error.message : String(error); await request(api("agent_videos", `?id=eq.${job.id}&user_id=eq.${job.user_id}`), { method: "PATCH", body: JSON.stringify({ render_status: "failed", error_message: message.slice(0, 1000) }) }).catch(() => {}); console.error(`[failed] ${job.id}: ${message}`); }
   await rm(work, { recursive: true, force: true });
 }
-async function tick() { const jobs = await request(api("agent_videos", "?select=id,user_id,song_id,type&render_status=eq.queued&order=created_at.asc&limit=1")); const job = jobs?.[0]; if (!job) return; const claimed = await request(api("agent_videos", `?id=eq.${job.id}&render_status=eq.queued`), { method: "PATCH", body: JSON.stringify({ render_status: "rendering" }) }); if (claimed) await processJob({ ...job }); }
-console.log(`Temney renderer ready; interval ${interval}ms`); while (true) { await tick().catch((error) => console.error(error)); await new Promise((resolve) => setTimeout(resolve, interval)); }
+async function tick() { const jobs = await request(api("agent_videos", "?select=id,user_id,song_id,type&render_status=eq.queued&order=created_at.asc&limit=1")); const job = jobs?.[0]; if (!job) return; const claimed = await request(api("agent_videos", `?id=eq.${job.id}&render_status=eq.queued`), { method: "PATCH", headers: { Prefer: "return=representation" }, body: JSON.stringify({ render_status: "rendering" }) }); const ok = Array.isArray(claimed) ? claimed.length > 0 : false; if (ok) await processJob({ ...job }); }
+console.log(`Temney renderer ready; interval ${interval}ms`); do { await tick().catch((error) => console.error(error)); if (process.env.RUN_ONCE === "1") break; await new Promise((resolve) => setTimeout(resolve, interval)); } while (true);
