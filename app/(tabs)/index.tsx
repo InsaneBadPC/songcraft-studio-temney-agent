@@ -1,8 +1,10 @@
 import MaterialIcons from "@expo/vector-icons/MaterialIcons";
 import { router } from "expo-router";
+import { useCallback, useMemo, type ComponentProps } from "react";
 import { FlatList, Pressable, StyleSheet, Text, View } from "react-native";
 
 import { CoverArt, EmptyState, LoadingState, PrimaryButton, SectionTitle, StatusChip, StudioHeader, formatDate } from "@/components/studio-ui";
+import { VideoJobsCard } from "@/components/video-jobs-card";
 import { ScreenContainer } from "@/components/screen-container";
 import { startPrivateLogin } from "@/constants/oauth";
 import { useAuth } from "@/hooks/use-auth";
@@ -14,23 +16,133 @@ export default function HomeScreen() {
   const { isAuthenticated, loading } = useAuth();
   const snapshot = trpc.studio.snapshot.useQuery(undefined, { enabled: isAuthenticated });
 
-  if (loading || (isAuthenticated && snapshot.isLoading)) return <ScreenContainer><LoadingState /></ScreenContainer>;
-  if (!isAuthenticated) return <ScreenContainer className="p-5 justify-center"><EmptyState icon="lock-outline" title="Tvoje studio je soukromé" text="Přihlas se svým soukromým účtem, aby se tvoje texty, přebaly a verze skladeb bezpečně synchronizovaly mezi Androidem a webem." action={<PrimaryButton label="Přihlásit se" icon="login" onPress={() => void startPrivateLogin()} />} /></ScreenContainer>;
+  const onRefresh = useCallback(() => {
+    void snapshot.refetch();
+  }, [snapshot]);
 
   const data = snapshot.data;
-  const drafts = data?.documents.filter((document) => document.status === "draft") ?? [];
-  const recent = data?.documents.slice(0, 3) ?? [];
-  const albumCount = data?.albums.length ?? 0;
-  const songCount = data?.songs.length ?? 0;
+  const drafts = useMemo(() => data?.documents.filter((document) => document.status === "draft") ?? [], [data?.documents]);
+  const recent = useMemo(() => data?.documents.slice(0, 4) ?? [], [data?.documents]);
+  const songs = data?.songs ?? [];
+  const versions = data?.versions ?? [];
+  const albums = data?.albums ?? [];
+  const missingCoverCount = songs.filter((song) => {
+    const album = albums.find((entry) => entry.id === song.albumId);
+    return !song.coverUrl && !album?.coverUrl;
+  }).length;
+  const awaitingFinalCount = songs.filter((song) => !versions.some((version) => version.songId === song.id && version.isFinal)).length;
+  const publishedCount = songs.filter((song) => song.isPublished).length;
+  const nextDraft = drafts[0];
 
-  return <ScreenContainer className="px-5"><FlatList data={recent} keyExtractor={(item) => String(item.id)} showsVerticalScrollIndicator={false} contentContainerStyle={styles.content} ListHeaderComponent={<>
-    <StudioHeader eyebrow="Kreativní pracovní prostor" title="SongCraft Studio" action={<Pressable onPress={() => void snapshot.refetch()} style={({ pressed }) => [styles.sync, { backgroundColor: colors.surface, borderColor: colors.border, opacity: pressed ? 0.65 : 1 }]}><MaterialIcons name="cloud-done" size={19} color={colors.success} /></Pressable>} />
-    <View style={[styles.hero, { backgroundColor: colors.surface, borderColor: `${colors.primary}66` }]}><View style={styles.heroCopy}><Text style={[styles.heroLabel, { color: colors.primary }]}>DALŠÍ KROK</Text><Text style={[styles.heroTitle, { color: colors.foreground }]}>{drafts.length ? `Pokračuj na „${drafts[0].title}“` : "Začni nový nápad"}</Text><Text style={[styles.heroText, { color: colors.muted }]}>{drafts.length ? "Rozpracovaný text čeká na další verš, prompt nebo přebal." : "Založ první text. Vše se uloží do tvého cloudového studia."}</Text></View><PrimaryButton label={drafts.length ? "Otevřít" : "Nový text"} icon={drafts.length ? "edit" : "add"} onPress={() => router.push((drafts.length ? `/text/${drafts[0].id}` : "/text/new") as never)} /></View>
-    <View style={styles.metrics}><Metric value={drafts.length} label="konceptů" color={colors.primary} /><Metric value={songCount} label="hotových skladeb" color={colors.success} /><Metric value={albumCount} label="alb" color={colors.foreground} /></View>
-    <SectionTitle title="Naposledy upravené" right={<Pressable onPress={() => router.push("/(tabs)/texts" as never)}><Text style={[styles.link, { color: colors.primary }]}>Všechny texty</Text></Pressable>} />
-  </>} renderItem={({ item }) => <Pressable onPress={() => router.push(`/text/${item.id}` as never)} style={({ pressed }) => [styles.documentRow, { borderColor: colors.border, backgroundColor: colors.surface, opacity: pressed ? 0.72 : 1 }]}><CoverArt uri={item.coverUrl} title={item.title} size={52} /><View style={styles.rowCopy}><Text numberOfLines={1} style={[styles.rowTitle, { color: colors.foreground }]}>{item.title}</Text><Text numberOfLines={1} style={[styles.rowMeta, { color: colors.muted }]}>{formatDate(item.updatedAt)} · {item.stylePrompt ? "prompt připraven" : "bez promptu"}</Text></View><StatusChip state={item.status} /></Pressable>} ListEmptyComponent={<EmptyState icon="edit-note" title="Ještě tu není žádný text" text="Každý koncept může nést prompt, text, poznámky i vlastní přebal." action={<PrimaryButton label="Vytvořit první text" onPress={() => router.push("/text/new" as never)} />} />} />
+  if (loading || (isAuthenticated && snapshot.isLoading)) return <ScreenContainer><LoadingState /></ScreenContainer>;
+  if (!isAuthenticated) {
+    return <ScreenContainer className="p-5 justify-center">
+      <EmptyState icon="lock" title="Tvoje studio je soukromé" text="Přihlas se a pokračuj v textech, obalech a verzích skladeb." action={<PrimaryButton label="Přihlásit se" icon="login" onPress={() => void startPrivateLogin()} />} />
+    </ScreenContainer>;
+  }
+
+  if (snapshot.isError) {
+    return <ScreenContainer className="p-5 justify-center">
+      <EmptyState icon="cloud-off" title="Studio se nepodařilo načíst" text={snapshot.error instanceof Error ? snapshot.error.message : "Zkontroluj připojení a zkus synchronizaci zopakovat."} action={<PrimaryButton label="Zkusit znovu" icon="refresh" onPress={onRefresh} />} />
+    </ScreenContainer>;
+  }
+
+  return <ScreenContainer className="px-5">
+    <FlatList
+      data={recent}
+      keyExtractor={(item) => String(item.id)}
+      showsVerticalScrollIndicator={false}
+      contentContainerStyle={styles.content}
+      refreshing={snapshot.isFetching}
+      onRefresh={onRefresh}
+      ListHeaderComponent={<>
+        <View style={styles.topRow}>
+          <StudioHeader eyebrow="Tvůj hudební workspace" title="Přehled" />
+          <Pressable accessibilityRole="button" accessibilityLabel="Synchronizovat studio" onPress={onRefresh} style={({ pressed }) => [styles.syncButton, { backgroundColor: colors.surface, borderColor: colors.border, opacity: pressed || snapshot.isFetching ? 0.65 : 1 }]}>
+            <MaterialIcons name={snapshot.isFetching ? "sync" : "cloud-done"} size={19} color={snapshot.isFetching ? colors.warning : colors.success} />
+          </Pressable>
+        </View>
+
+        <View style={styles.syncLine}><View style={[styles.syncDot, { backgroundColor: snapshot.isFetching ? colors.warning : colors.success }]} /><Text style={[styles.syncText, { color: colors.muted }]}>{snapshot.isFetching ? "Synchronizuji změny…" : "Synchronizováno s bezpečným cloudem"}</Text></View>
+
+        <View style={[styles.hero, { backgroundColor: colors.surface, borderColor: `${colors.primary}55` }]}>
+          <View style={styles.heroCopy}>
+            <Text style={[styles.eyebrow, { color: colors.primary }]}>DALŠÍ KROK</Text>
+            <Text style={[styles.heroTitle, { color: colors.foreground }]}>{nextDraft ? `Pokračovat u „${nextDraft.title}“` : "Založit další píseň"}</Text>
+            <Text style={[styles.heroText, { color: colors.muted }]}>{nextDraft ? "Tvůj koncept čeká na dokončení. Všechno ostatní je bezpečně uložené." : "Vytvoř text, přidej styl a později k němu připoj finální MP3."}</Text>
+          </View>
+          <View style={styles.heroActions}>
+            <PrimaryButton label={nextDraft ? "Pokračovat" : "Nová skladba"} icon={nextDraft ? "edit" : "add"} onPress={() => router.push((nextDraft ? `/text/${nextDraft.id}` : "/song/new") as never)} />
+            <Pressable accessibilityRole="button" onPress={() => router.push("/text/new" as never)} style={({ pressed }) => [styles.secondaryAction, { borderColor: colors.border, opacity: pressed ? 0.65 : 1 }]}><MaterialIcons name="description" size={17} color={colors.foreground} /><Text style={[styles.secondaryActionText, { color: colors.foreground }]}>Nový text</Text></Pressable>
+          </View>
+        </View>
+
+        <View style={styles.quickActions}>
+          <QuickAction icon="library-music" label="Knihovna" detail={`${songs.length} skladeb`} onPress={() => router.push("/(tabs)/library" as never)} colors={colors} />
+          <QuickAction icon="auto-awesome" label="AI asistent" detail="Nápady a metadata" onPress={() => router.push("/(tabs)/assistant" as never)} colors={colors} />
+          <QuickAction icon="album" label="Alba" detail={`${albums.length} alb`} onPress={() => router.push("/(tabs)/albums" as never)} colors={colors} />
+        </View>
+
+        <SectionTitle title="Co potřebuje pozornost" />
+        <View style={styles.attentionGrid}>
+          <AttentionCard icon="edit-note" value={drafts.length} label="Rozpracované texty" color={colors.primary} onPress={() => router.push("/(tabs)/texts" as never)} />
+          <AttentionCard icon="image" value={missingCoverCount} label="Bez obalu" color={colors.warning} onPress={() => router.push("/(tabs)/library" as never)} />
+          <AttentionCard icon="music-note" value={awaitingFinalCount} label="Bez finální MP3" color={colors.foreground} onPress={() => router.push("/(tabs)/library" as never)} />
+          <AttentionCard icon="public" value={publishedCount} label="Publikované" color={colors.success} onPress={() => router.push("/(tabs)/library" as never)} />
+        </View>
+        <VideoJobsCard />
+
+        <SectionTitle title="Poslední práce" right={<Pressable onPress={() => router.push("/(tabs)/texts" as never)}><Text style={[styles.link, { color: colors.primary }]}>Všechny texty</Text></Pressable>} />
+      </>}
+      renderItem={({ item }) => {
+        const album = albums.find((entry) => entry.id === item.albumId);
+        return <Pressable accessibilityRole="button" onPress={() => router.push(`/text/${item.id}` as never)} style={({ pressed }) => [styles.documentRow, { backgroundColor: colors.surface, borderColor: colors.border, opacity: pressed ? 0.7 : 1 }]}>
+          <CoverArt uri={item.coverUrl ?? album?.coverUrl} title={item.title} size={54} />
+          <View style={styles.rowCopy}><Text numberOfLines={1} style={[styles.rowTitle, { color: colors.foreground }]}>{item.title}</Text><Text numberOfLines={1} style={[styles.rowMeta, { color: colors.muted }]}>{album?.name ?? "Bez alba"} · {formatDate(item.updatedAt)}</Text></View>
+          <StatusChip state={item.status} />
+          <MaterialIcons name="chevron-right" size={19} color={colors.muted} />
+        </Pressable>;
+      }}
+      ListEmptyComponent={<EmptyState icon="edit-note" title="Zatím tu nejsou žádné texty" text="Začni prvním konceptem. Můžeš přidat prompt, text písně, poznámky i obal." action={<PrimaryButton label="Vytvořit první text" icon="add" onPress={() => router.push("/text/new" as never)} />} />}
+    />
   </ScreenContainer>;
 }
 
-function Metric({ value, label, color }: { value: number; label: string; color: string }) { return <View style={styles.metric}><Text style={[styles.metricValue, { color }]}>{value}</Text><Text style={styles.metricLabel}>{label}</Text></View>; }
-const styles = StyleSheet.create({ content: { paddingTop: 14, paddingBottom: 28 }, sync: { height: 43, width: 43, borderRadius: 14, borderWidth: 1, alignItems: "center", justifyContent: "center" }, hero: { borderWidth: 1, borderRadius: 24, padding: 20, gap: 20 }, heroCopy: { gap: 7 }, heroLabel: { fontSize: 10, fontWeight: "900", letterSpacing: 1.1 }, heroTitle: { fontSize: 20, lineHeight: 26, fontWeight: "800", letterSpacing: -0.3 }, heroText: { fontSize: 14, lineHeight: 20 }, metrics: { flexDirection: "row", gap: 10, marginTop: 12 }, metric: { flex: 1, minHeight: 78, justifyContent: "center", borderRadius: 18, backgroundColor: "rgba(255,255,255,0.04)", paddingHorizontal: 12 }, metricValue: { fontSize: 23, fontWeight: "900", letterSpacing: -0.4 }, metricLabel: { color: "#9B91A7", fontSize: 10, lineHeight: 14, fontWeight: "700", marginTop: 2 }, link: { fontSize: 13, fontWeight: "800" }, documentRow: { borderWidth: 1, borderRadius: 18, padding: 11, flexDirection: "row", alignItems: "center", gap: 12, marginBottom: 9 }, rowCopy: { flex: 1, gap: 3 }, rowTitle: { fontSize: 15, fontWeight: "800" }, rowMeta: { fontSize: 12, fontWeight: "500" } });
+function QuickAction({ icon, label, detail, onPress, colors }: { icon: ComponentProps<typeof MaterialIcons>["name"]; label: string; detail: string; onPress: () => void; colors: ReturnType<typeof useColors> }) {
+  return <Pressable accessibilityRole="button" onPress={onPress} style={({ pressed }) => [styles.quickAction, { backgroundColor: colors.surface, borderColor: colors.border, opacity: pressed ? 0.65 : 1 }]}><MaterialIcons name={icon} size={20} color={colors.primary} /><Text style={[styles.quickLabel, { color: colors.foreground }]}>{label}</Text><Text style={[styles.quickDetail, { color: colors.muted }]}>{detail}</Text></Pressable>;
+}
+
+function AttentionCard({ icon, value, label, color, onPress }: { icon: ComponentProps<typeof MaterialIcons>["name"]; value: number; label: string; color: string; onPress: () => void }) {
+  const colors = useColors();
+  return <Pressable accessibilityRole="button" onPress={onPress} style={({ pressed }) => [styles.attentionCard, { backgroundColor: colors.surface, borderColor: colors.border, opacity: pressed ? 0.65 : 1 }]}><MaterialIcons name={icon} size={18} color={color} /><Text style={[styles.attentionValue, { color }]}>{value}</Text><Text style={[styles.attentionLabel, { color: colors.muted }]}>{label}</Text></Pressable>;
+}
+
+const styles = StyleSheet.create({
+  content: { paddingTop: 14, paddingBottom: 36, gap: 12 },
+  topRow: { flexDirection: "row", alignItems: "flex-start" },
+  syncButton: { width: 44, height: 44, borderRadius: 14, borderWidth: 1, alignItems: "center", justifyContent: "center", marginTop: 5, marginLeft: 8 },
+  syncLine: { flexDirection: "row", alignItems: "center", gap: 7, marginTop: -4, marginBottom: 2 },
+  syncDot: { width: 7, height: 7, borderRadius: 4 },
+  syncText: { fontSize: 12, fontWeight: "600" },
+  hero: { borderWidth: 1, borderRadius: 24, padding: 20, gap: 18, marginTop: 2 },
+  heroCopy: { gap: 7 },
+  eyebrow: { fontSize: 10, fontWeight: "900", letterSpacing: 1.1 },
+  heroTitle: { fontSize: 22, lineHeight: 28, fontWeight: "900" },
+  heroText: { fontSize: 14, lineHeight: 20 },
+  heroActions: { gap: 9 },
+  secondaryAction: { minHeight: 44, borderRadius: 14, borderWidth: 1, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8 },
+  secondaryActionText: { fontSize: 14, fontWeight: "800" },
+  quickActions: { flexDirection: "row", gap: 8, marginTop: 2 },
+  quickAction: { flex: 1, minHeight: 82, borderRadius: 17, borderWidth: 1, padding: 11, gap: 4 },
+  quickLabel: { fontSize: 12, fontWeight: "800" },
+  quickDetail: { fontSize: 10, lineHeight: 14 },
+  attentionGrid: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
+  attentionCard: { width: "48.5%", minHeight: 88, borderRadius: 17, borderWidth: 1, padding: 12, gap: 4 },
+  attentionValue: { fontSize: 22, fontWeight: "900" },
+  attentionLabel: { fontSize: 11, lineHeight: 15, fontWeight: "600" },
+  documentRow: { minHeight: 72, borderRadius: 18, borderWidth: 1, padding: 10, flexDirection: "row", alignItems: "center", gap: 10, marginBottom: 2 },
+  rowCopy: { flex: 1, gap: 4 },
+  rowTitle: { fontSize: 15, fontWeight: "800" },
+  rowMeta: { fontSize: 11, lineHeight: 15 },
+  link: { fontSize: 13, fontWeight: "800" },
+});

@@ -17,16 +17,18 @@ export function useUndoableText(initial: string = "") {
   const reset = useCallback((next: string) => {
     history.current = [{ v: next, t: Date.now() }];
     index.current = 0;
+    valueRef.current = next;
     setValue(next);
+    bump((n) => n + 1);
   }, []);
 
-  const change = useCallback((next: string) => {
+  const change = useCallback((next: string, coalesce = true) => {
     const now = Date.now();
     const entries = history.current;
     // Psaní po Zpět zahodí nepoužitou budoucnost.
     if (index.current < entries.length - 1) entries.splice(index.current + 1);
     const last = entries[entries.length - 1];
-    if (last && now - last.t < 700 && Math.abs(next.length - last.v.length) < 40) {
+    if (coalesce && last && now - last.t < 700 && Math.abs(next.length - last.v.length) < 40) {
       last.v = next;
       last.t = now;
     } else {
@@ -39,19 +41,21 @@ export function useUndoableText(initial: string = "") {
   }, []);
 
   const undo = useCallback(() => {
-    if (index.current <= 0) return;
+    if (index.current <= 0) return undefined;
     index.current -= 1;
     const entry = history.current[index.current];
     setValue(entry.v);
     bump((n) => n + 1);
+    return entry.v;
   }, []);
 
   const redo = useCallback(() => {
-    if (index.current >= history.current.length - 1) return;
+    if (index.current >= history.current.length - 1) return undefined;
     index.current += 1;
     const entry = history.current[index.current];
     setValue(entry.v);
     bump((n) => n + 1);
+    return entry.v;
   }, []);
 
   useEffect(() => { reset(initial); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [initial]);

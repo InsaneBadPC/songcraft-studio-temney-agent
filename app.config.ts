@@ -5,10 +5,14 @@ import type { ExpoConfig } from "expo/config";
 // Jediný zdroj pravdy pro verzi aplikace: package.json.
 const appVersion: string = require("./package.json").version;
 // Android verze musí být monotónně rostoucí celé číslo (major*10000 + minor*100 + patch).
-const versionCode = appVersion
+const versionCodeFromPackage = appVersion
   .split(".")
   .map((part: string) => parseInt(part, 10) || 0)
   .reduce((acc: number, part: number, index: number) => acc + part * Math.pow(100, 2 - index), 0);
+// CI může versionCode přepsat: automatický build po každé změně musí mít vyšší
+// číslo než předchozí vydaný APK (Android nižší verzi nepřijme), jinak platí package.json.
+const versionCodeOverride = Number(process.env.EXPO_ANDROID_VERSION_CODE);
+const versionCode = Number.isFinite(versionCodeOverride) && versionCodeOverride > 0 ? versionCodeOverride : versionCodeFromPackage;
 
 // Nezávislý identifikátor aplikace pro externí Android/iOS sestavení.
 const rawBundleId = "com.temney.songcraftstudio";
@@ -29,7 +33,7 @@ const bundleId =
 
 const env = {
   // App branding - update these values directly (do not use env vars)
-  appName: "SongCraft Studio 3.0",
+  appName: "SongCraft Studio",
   appSlug: "songcraft-studio",
   // Ikona je součástí sestavení v assets/images/icon.png.
   logoUrl: "",

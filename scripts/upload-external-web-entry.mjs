@@ -1,7 +1,13 @@
 import { readFile } from "node:fs/promises";
 
-const supabaseUrl = "https://hfykngbhcxmnpxvjagoj.supabase.co";
-const deployToken = "scweb-20260821-8c1e9bb4-02b9-4852-a120-298dff715f63";
+const supabaseUrl = process.env.SONGCRAFT_SUPABASE_URL || "https://hfykngbhcxmnpxvjagoj.supabase.co";
+// Token patří do prostředí / GitHub Secrets. V repu nesmí být žádná hodnota.
+const deployToken = process.env.SONGCRAFT_WEB_DEPLOY_TOKEN;
+if (!deployToken) {
+  throw new Error(
+    "Chybí SONGCRAFT_WEB_DEPLOY_TOKEN. Token patří do prostředí / GitHub Secrets, ne do repozitáře.",
+  );
+}
 const body = await readFile(new URL("../dist-web/index.html", import.meta.url));
 const response = await fetch(`${supabaseUrl}/functions/v1/songcraft-web-deployer`, {
   method: "POST",

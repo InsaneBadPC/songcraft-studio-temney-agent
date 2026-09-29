@@ -1,34 +1,16 @@
-name: Render YouTube video
+name: Retired public video renderer
 
 on:
-  repository_dispatch:
-    types: [render-youtube]
+  workflow_dispatch:
 
 permissions:
-  contents: write
-
-concurrency:
-  group: render-${{ github.event.client_payload.jobId }}
-  cancel-in-progress: false
+  contents: read
 
 jobs:
-  render:
+  retired:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
     steps:
-      - name: Check out repository
-        uses: actions/checkout@v4
-
-      - name: Install FFmpeg
-        run: sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg
-
-      - name: Render Full HD MP4 a publikovat jako GitHub release asset
-        env:
-          SONGCRAFT_SUPABASE_URL: "https://hfykngbhcxmnpxvjagoj.supabase.co"
-          SONGCRAFT_SERVICE_ROLE_KEY: ${{ secrets.SONGCRAFT_SERVICE_ROLE_KEY }}
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          JOB_ID: ${{ github.event.client_payload.jobId }}
-          SONG_ID: ${{ github.event.client_payload.songId }}
-          VERSION_ID: ${{ github.event.client_payload.versionId }}
-          EFFECT: ${{ github.event.client_payload.effect }}
-        run: node scripts/render/render-youtube.mjs
+      - name: Fail closed
+        run: |
+          echo "Public GitHub release rendering is retired; use the private Oracle worker."
+          exit 1

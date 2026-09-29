@@ -1,6 +1,7 @@
 // @ts-nocheck -- tato část se kompiluje Deno runtimem Supabase, nikoli bundlerem Expo.
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "jsr:@supabase/supabase-js@2";
+import { isAllowedPrivateUser, privateAccessMessage } from "../_shared/access.ts";
 
 const cors = { "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type", "Access-Control-Allow-Methods": "POST, OPTIONS" };
 const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { ...cors, "Content-Type": "application/json" } });
@@ -11,13 +12,14 @@ Deno.serve(async (request) => {
   if (request.method === "OPTIONS") return new Response("ok", { headers: cors });
   if (request.method !== "POST") return json({ error: "Použij POST požadavek." }, 405);
   const authorization = request.headers.get("Authorization");
-  const url = Deno.env.get("SUPABASE_URL");
-  const anonKey = Deno.env.get("SUPABASE_ANON_KEY");
+  const url = Deno.env.get("SUPABASE_URL") || Deno.env.get("SONGCRAFT_SUPABASE_URL");
+  const anonKey = Deno.env.get("SUPABASE_ANON_KEY") || Deno.env.get("SONGCRAFT_SUPABASE_ANON_KEY");
   if (!authorization || !url || !anonKey) return json({ error: "Chybí bezpečné připojení k externímu cloudu." }, 401);
   const supabase = createClient(url, anonKey, { global: { headers: { Authorization: authorization } } });
-  const admin = createClient(url, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? anonKey);
+  const admin = createClient(url, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || Deno.env.get("SONGCRAFT_SERVICE_ROLE_KEY") || anonKey);
   const { data: { user }, error: authError } = await supabase.auth.getUser();
   if (authError || !user) return json({ error: "Neplatné přihlášení." }, 401);
+  if (!isAllowedPrivateUser(user, { allowedUserIds: Deno.env.get("SONGCRAFT_ALLOWED_USER_IDS") ?? undefined, allowedEmails: Deno.env.get("SONGCRAFT_ALLOWED_EMAILS") ?? undefined })) return json({ error: privateAccessMessage() }, 403);
 
   const input = await request.json().catch(() => null) as { action?: "create" | "check"; entityType?: "song" | "lyric" | "album"; entityId?: string; jobId?: string; format?: "youtube_16_9"; userNote?: string | null } | null;
   if (!input?.action || !input.entityType || !input.entityId) return json({ error: "Chybí skladba nebo akce." }, 400);
@@ -45,7 +47,7 @@ Deno.serve(async (request) => {
 
   // Kontrola stavu existující úlohy skládání (po předání do GitHub Actions).
   if (input.action === "check" && input.jobId) {
-    const { data: job } = await admin.from("sc_cover_jobs").select("id,user_id,status,cover_path,error").eq("id", input.jobId).single();
+    const { data: job } = await admin.from("sc_cover_jobs").select("id,user_id,status,cover_path,error").eq("id", input.jobId).eq("user_id", user.id).single();
     if (job && job.user_id === user.id) {
       if (job.status === "failed") return json({ status: "failed", error: job.error || "Skládání obalu selhalo." });
       if (job.status !== "completed" || !job.cover_path) return json({ status: "processing", message: "Bezplatný renderer skládá 16:9 obal…" });
@@ -83,18 +85,23 @@ Deno.serve(async (request) => {
       if (dataUri) {
         imageMime = dataUri[1];
         imageBytes = Uint8Array.from(atob(dataUri[2]), (character) => character.charCodeAt(0));
+        if (imageBytes.byteLength <= 0 || imageBytes.byteLength > 10 * 1024 * 1024) throw new Error("download-size");
       } else if (/^https:\/\//i.test(source)) {
-        const imageResponse = await fetch(source);
+        const imageResponse = await fetch(source, { signal: AbortSignal.timeout(60_000) });
         const mime = imageResponse.headers.get("content-type")?.split(";")[0] || "image/webp";
-        if (!imageResponse.ok || !mime.startsWith("image/")) throw new Error("download");
+        if (!imageResponse.ok || !["image/jpeg", "image/png", "image/webp"].includes(mime)) throw new Error("download");
+        if (Number(imageResponse.headers.get("content-length") || 0) > 10 * 1024 * 1024) throw new Error("download-size");
         imageMime = mime;
         imageBytes = new Uint8Array(await imageResponse.arrayBuffer());
+        if (imageBytes.byteLength <= 0 || imageBytes.byteLength > 10 * 1024 * 1024) throw new Error("download-size");
       } else {
         imageBytes = Uint8Array.from(atob(source), (character) => character.charCodeAt(0));
+        if (imageBytes.byteLength <= 0 || imageBytes.byteLength > 10 * 1024 * 1024) throw new Error("download-size");
       }
     } catch {
       return json({ status: "failed", error: "Výsledný obrázek se nepodařilo načíst." });
     }
+    if (!["image/jpeg", "image/png", "image/webp"].includes(imageMime)) return json({ status: "failed", error: "Výsledný obrázek má nepodporovaný formát." }, 415);
 
     // Čtvercový formát: uložit rovnou.
     if (!youtubeCover) {
@@ -106,29 +113,15 @@ Deno.serve(async (request) => {
       return json({ status: "completed", coverPath: path });
     }
 
-    // 16:9: surový obrázek uložíme a složení přenecháme bezplatnému GitHub rendereru.
+    // 16:9 fallback is kept private. The former GitHub Actions renderer was
+    // removed from the active path because it exposed a public release asset.
+    // The raw AI image is safe to crop in the client until the Oracle cover
+    // composer is deployed; it is never published outside this user's bucket.
     const rawPath = `${user.id}/covers/raw/${safe(entityTitle)}-${crypto.randomUUID()}.${imageMime.includes("png") ? "png" : imageMime.includes("jpeg") ? "jpg" : "webp"}`;
     const { error: rawUploadError } = await supabase.storage.from("songcraft").upload(rawPath, imageBytes, { contentType: imageMime, upsert: false });
     if (rawUploadError) return json({ status: "failed", error: rawUploadError.message });
-
-    const githubToken = Deno.env.get("GH_DISPATCH_TOKEN");
-    if (!githubToken) return json({ status: "failed", error: "Renderer obalů není správně nakonfigurován." });
-
-    await admin.from("sc_cover_jobs").upsert({ id: input.jobId, user_id: user.id, entity_type: input.entityType, entity_id: input.entityId, title: entityTitle, album_name: albumName, status: "processing", updated_at: new Date().toISOString() });
-
-    const dispatch = await fetch(`https://api.github.com/repos/InsaneBadPC/songcraft-studio/dispatches`, {
-      method: "POST",
-      headers: { Authorization: `Bearer ${githubToken}`, Accept: "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28" },
-      body: JSON.stringify({
-        event_type: "compose-cover",
-        client_payload: { jobId: input.jobId, userId: user.id, entityType: input.entityType, entityId: input.entityId, title: entityTitle, albumName, rawPath },
-      }),
-    });
-    if (!dispatch.ok && dispatch.status !== 204) {
-      await admin.from("sc_cover_jobs").update({ status: "failed", error: `Skládání se nepodařilo spustit (${dispatch.status}).` }).eq("id", input.jobId);
-      return json({ status: "failed", error: `Skládání obalu se nepodařilo spustit (${dispatch.status}).` });
-    }
-    return json({ status: "processing", message: "Bezplatný renderer skládá 16:9 obal…" });
+    await admin.from("sc_cover_jobs").upsert({ id: input.jobId, user_id: user.id, entity_type: input.entityType, entity_id: input.entityId, title: entityTitle, album_name: albumName, status: "completed", cover_path: rawPath, error: "16:9 composer pending; private source stored for safe crop.", updated_at: new Date().toISOString() });
+    return json({ status: "completed", coverPath: rawPath, message: "Soukromý zdrojový obal je uložený; zobrazí se bezpečným oříznutím." });
   }
 
   return json({ error: "Neznámá akce." }, 400);

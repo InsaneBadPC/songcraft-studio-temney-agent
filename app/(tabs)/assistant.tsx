@@ -11,25 +11,21 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { EmptyState, Shimmer, StudioHeader } from "@/components/studio-ui";
 import { ScreenContainer } from "@/components/screen-container";
 import { startPrivateLogin } from "@/constants/oauth";
-import { askStudioAssistant, type StudioAssistantMessage } from "@/lib/assistant-chat";
+import { askSongCraftAgent, confirmSongCraftAction, isConfirmableAction, type AgentPendingAction } from "@/lib/agent-api";
+import type { StudioAssistantMessage } from "@/lib/assistant-chat";
+import { MAX_ASSISTANT_CONVERSATIONS, upsertAssistantConversation, type AssistantConversation } from "@/lib/assistant-history";
 import { useAuth } from "@/hooks/use-auth";
 import { useColors } from "@/hooks/use-colors";
 
 const SUGGESTIONS = [
-  { icon: "auto-awesome" as const, text: "Navrhni další krok pro můj kanál", sub: "Obsah, vydání a růst" },
-  { icon: "album" as const, text: "Které album mám rozpracovat dál?", sub: "Přehled mých materiálů" },
-  { icon: "image" as const, text: "Připrav artwork pro skladbu", sub: "Temney character bible + prompt" },
+  { icon: "auto-awesome" as const, text: "Navrhni refrén podle mých textů", sub: "Analýza stylu + nálady" },
+  { icon: "album" as const, text: "Jaké album mám rozpracovat dál?", sub: "Přehled nedokončených" },
+  { icon: "image" as const, text: "Vytvoř prompt pro přebal", sub: "Pro Al generátor" },
 ];
 
-type Conversation = { id: string; title: string; messages: StudioAssistantMessage[]; createdAt: number; updatedAt: number };
-const MAX_CONVERSATIONS = 5;
+type Conversation = AssistantConversation;
+const MAX_CONVERSATIONS = MAX_ASSISTANT_CONVERSATIONS;
 const storageKey = (userId: string) => `assistant_history_${userId}`;
-
-function titleFromMessages(messages: StudioAssistantMessage[]): string {
-  const first = messages.find((m) => m.role === "user")?.content.trim() ?? "";
-  if (!first) return "Nová konverzace";
-  return first.slice(0, 42) + (first.length > 42 ? "…" : "");
-}
 
 export default function AssistantScreen() {
   const colors = useColors();
@@ -41,74 +37,102 @@ export default function AssistantScreen() {
   const [activeId, setActiveId] = useState<string | null>(null);
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [pendingActions, setPendingActions] = useState<AgentPendingAction[]>([]);
+  const [serverConversationId, setServerConversationId] = useState<string | null>(null);
+  const [confirming, setConfirming] = useState(false);
   const hasMessages = messages.length > 0;
   const inputDisabled = sending || !isAuthenticated;
   const flatListRef = useRef<FlatList>(null);
+  const activeUserIdRef = useRef<string | null>(null);
+  const loadedUserIdRef = useRef<string | null>(null);
+  const conversationsRef = useRef<Conversation[]>([]);
+  const activeIdRef = useRef<string | null>(null);
+  activeUserIdRef.current = user?.id ?? null;
+  conversationsRef.current = conversations;
+  activeIdRef.current = activeId;
 
-  const loadHistory = useCallback(async (uid: string) => {
+  const readHistory = useCallback(async (uid: string): Promise<Conversation[] | null> => {
     try {
       const raw = await AsyncStorage.getItem(storageKey(uid));
-      if (!raw) return;
-      const parsed = JSON.parse(raw) as Conversation[];
-      if (!Array.isArray(parsed) || !parsed.length) return;
-      const sorted = parsed.sort((a, b) => b.updatedAt - a.updatedAt).slice(0, MAX_CONVERSATIONS);
-      setConversations(sorted);
-      setActiveId(sorted[0].id);
-      setMessages(sorted[0].messages);
-    } catch {}
+      if (!raw) return null;
+      const parsed = JSON.parse(raw) as unknown;
+      if (!Array.isArray(parsed)) return null;
+      const valid = parsed.filter((entry): entry is Conversation => {
+        if (!entry || typeof entry !== "object") return false;
+        const candidate = entry as Conversation;
+        return typeof candidate.id === "string" && typeof candidate.updatedAt === "number" && Array.isArray(candidate.messages) && candidate.messages.every((message) => Boolean(message && typeof message === "object" && typeof message.id === "string" && (message.role === "user" || message.role === "assistant") && typeof message.content === "string"));
+      });
+      return valid.sort((a, b) => b.updatedAt - a.updatedAt).slice(0, MAX_CONVERSATIONS);
+    } catch {
+      return null;
+    }
   }, []);
 
   const persist = useCallback(async (uid: string, convs: Conversation[]) => {
+    if (activeUserIdRef.current !== uid) return;
     try { await AsyncStorage.setItem(storageKey(uid), JSON.stringify(convs.slice(0, MAX_CONVERSATIONS))); } catch {}
   }, []);
 
-  useEffect(() => { if (user?.id) void loadHistory(user.id); else { setConversations([]); setActiveId(null); setMessages([]); } }, [user?.id, loadHistory]);
+  useEffect(() => {
+    let cancelled = false;
+    setConversations([]);
+    setActiveId(null);
+    setMessages([]);
+    setSending(false);
+    setError(null);
+    setPendingActions([]);
+    setServerConversationId(null);
+    setConfirming(false);
+    const uid = user?.id;
+    loadedUserIdRef.current = uid ?? null;
+    if (!uid) return;
+    void readHistory(uid).then((sorted) => {
+      if (cancelled || activeUserIdRef.current !== uid || !sorted?.length) return;
+      setConversations(sorted);
+      setActiveId(sorted[0].id);
+      setMessages(sorted[0].messages);
+    });
+    return () => { cancelled = true; };
+  }, [readHistory, user?.id]);
 
   const upsertCurrent = useCallback((nextMessages: StudioAssistantMessage[], currentId: string | null, convs: Conversation[]) => {
-    const now = Date.now();
-    if (!currentId) {
-      const id = `conv-${now}`;
-      const conv: Conversation = { id, title: titleFromMessages(nextMessages), messages: nextMessages, createdAt: now, updatedAt: now };
-      return { convs: [conv, ...convs].slice(0, MAX_CONVERSATIONS), id };
-    }
-    const updated = convs.map((c) => (c.id === currentId ? { ...c, messages: nextMessages, title: titleFromMessages(nextMessages), updatedAt: now } : c));
-    updated.sort((a, b) => b.updatedAt - a.updatedAt);
-    return { convs: updated.slice(0, MAX_CONVERSATIONS), id: currentId };
+    const result = upsertAssistantConversation(convs, currentId, nextMessages);
+    return { convs: result.conversations, id: result.id, changed: result.changed };
   }, []);
 
   useEffect(() => {
-    if (!user?.id) return;
-    if (messages.length === 0 && !activeId && conversations.length === 0) return;
+    if (!user?.id || messages.length === 0) return;
     const timeout = setTimeout(() => {
-      if (!user?.id) return;
-      const { convs, id } = upsertCurrent(messages, activeId, conversations);
-      const changed = JSON.stringify(convs) !== JSON.stringify(conversations) || id !== activeId;
+      if (activeUserIdRef.current !== user.id || loadedUserIdRef.current !== user.id) return;
+      const { convs, id, changed } = upsertCurrent(messages, activeId, conversationsRef.current);
       if (changed) { setConversations(convs); setActiveId(id); void persist(user.id, convs); }
     }, 300);
     return () => clearTimeout(timeout);
-  }, [messages, activeId, conversations, persist, upsertCurrent, user?.id]);
+  }, [messages, activeId, persist, upsertCurrent, user?.id]);
 
   const startNewConversation = useCallback(async () => {
-    if (!user?.id) return;
+    const uid = user?.id;
+    if (!uid) return;
     Haptics.selectionAsync().catch(()=>{});
     let convs = conversations;
-    if (messages.length) { const res = upsertCurrent(messages, activeId, conversations); convs = res.convs; await persist(user.id, convs); }
-    setMessages([]); setActiveId(null); setError(null);
+    if (messages.length) { const res = upsertCurrent(messages, activeId, conversations); convs = res.convs; await persist(uid, convs); }
+    if (activeUserIdRef.current !== uid) return;
+    setMessages([]); setActiveId(null); setError(null); setPendingActions([]); setServerConversationId(null);
   }, [user?.id, messages, activeId, conversations, persist, upsertCurrent]);
 
   const switchConversation = useCallback((id: string) => {
     Haptics.selectionAsync().catch(()=>{});
     const conv = conversations.find((c) => c.id === id);
     if (!conv) return;
-    setActiveId(id); setMessages(conv.messages); setError(null);
+    setActiveId(id); setMessages(conv.messages); setError(null); setPendingActions([]); setServerConversationId(null);
   }, [conversations]);
 
   const listHeader = useMemo(() => (
     <>
-      <StudioHeader eyebrow="Temney Agent · bezpečný režim" title="Temney Agent" />
+      <StudioHeader eyebrow="Experimentální větev" title="Asistent" />
       <View style={[styles.notice, { backgroundColor: colors.surface, borderColor: "rgba(255,255,255,0.08)", shadowColor: "#000", shadowOpacity: 0.12, shadowRadius: 12, shadowOffset: { width: 0, height: 4 }, elevation: 4 }]}>
         <View style={[styles.noticeIcon, { backgroundColor: `${colors.primary}14`, borderColor: "rgba(255,255,255,0.08)" }]}><MaterialIcons name="privacy-tip" size={18} color={colors.primary} /></View>
-        <Text style={[styles.noticeText, { color: colors.muted }]}>Pracuje jen s tvými texty, alby a skladbami. Artwork připravuje jako návrh; veřejné akce ani změny účtu nikdy neprovede bez tvého potvrzení.</Text>
+        <Text style={[styles.noticeText, { color: colors.muted }]}>Pracuje jen s tvými texty, alby a skladbami. Akce s veřejným dopadem vyžadují potvrzení.</Text>
       </View>
       {isAuthenticated && conversations.length > 0 ? (
         <Animated.View entering={FadeInUp.duration(380)} style={styles.historyBlock}>
@@ -142,7 +166,7 @@ export default function AssistantScreen() {
               </Pressable>
             </Animated.View>
           ))}
-          <Text style={[styles.disclaimer, { color: colors.muted }]}>Temney pipeline • motivy, artwork, metadata a publikační návrhy</Text>
+          <Text style={[styles.disclaimer, { color: colors.muted }]}>Bezplatný experiment • připraví prompt pro obal, tagy i popis</Text>
         </View>
       ) : null}
     </>
@@ -150,24 +174,58 @@ export default function AssistantScreen() {
 
   async function send(text = draft) {
     const content = text.trim();
-    if (!content || sending) return;
+    const requestUserId = user?.id;
+    if (!content || sending || !requestUserId) return;
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(()=>{});
     const userMessage: StudioAssistantMessage = { id: `user-${Date.now()}`, role: "user", content };
     const history = [...messages, userMessage];
     setMessages(history); setDraft(""); setError(null); setSending(true);
     try {
-      const answer = await askStudioAssistant(content, messages);
-      const withAnswer: StudioAssistantMessage[] = [...history, { id: `assistant-${Date.now()}`, role: "assistant", content: answer }];
+      const result = await askSongCraftAgent(content, messages, serverConversationId);
+      if (activeUserIdRef.current !== requestUserId) return;
+      const withAnswer: StudioAssistantMessage[] = [...history, { id: `assistant-${Date.now()}`, role: "assistant", content: result.answer }];
       setMessages(withAnswer);
-      if (user?.id) { const { convs, id } = upsertCurrent(withAnswer, activeId, conversations); setConversations(convs); setActiveId(id); await persist(user.id, convs); }
-    } catch (caught) { setError(caught instanceof Error ? caught.message : "Asistent nyní není dostupný."); } finally { setSending(false); }
+      setPendingActions(result.pending);
+      if (result.conversationId) setServerConversationId(result.conversationId);
+      const { convs, id } = upsertCurrent(withAnswer, activeIdRef.current, conversationsRef.current);
+      setConversations(convs); setActiveId(id); await persist(requestUserId, convs);
+    } catch (caught) { if (activeUserIdRef.current === requestUserId) setError(caught instanceof Error ? caught.message : "Asistent nyní není dostupný."); } finally { if (activeUserIdRef.current === requestUserId) setSending(false); }
   }
+
+  async function confirmAction(action: AgentPendingAction) {
+    if (!isConfirmableAction(action.tool) || !action.confirmationId || !action.confirmationToken || confirming) return;
+    setConfirming(true);
+    try {
+      const result = await confirmSongCraftAction(action.tool, action.confirmationId, action.confirmationToken);
+      if (result.status === "published") {
+        setPendingActions((current) => current.filter((entry) => entry.confirmationId !== action.confirmationId));
+        Alert.alert("Publikace je hotová", result.youtubeVideoId ? `YouTube video ${result.youtubeVideoId} je nyní publikované.` : "Video bylo publikované.");
+      } else if (result.error) {
+        Alert.alert("Akce se nezdařila", result.error);
+      } else if (result.status === "approved") {
+        setPendingActions((current) => current.filter((entry) => entry.confirmationId !== action.confirmationId));
+        Alert.alert("Potvrzeno", result.message || "Operace se spustí na serveru.");
+      }
+    } catch (caught) {
+      Alert.alert("Potvrzení se nezdařilo", caught instanceof Error ? caught.message : "Zkus to znovu.");
+    } finally {
+      setConfirming(false);
+    }
+  }
+
+  const ACTION_LABELS: Record<string, string> = {
+    publish_to_youtube: "Publikovat na YouTube",
+    run_vm_command: "Spustit příkaz na serveru",
+    push_git_branch: "Pushnout větev do repa",
+    deploy_worker: "Nasadit workera na server",
+    read_repo_file: "Přečíst soubor z repa",
+    read_skills: "Přečíst dokumentaci",
+  };
 
   async function copyMessage(content: string) {
     Haptics.selectionAsync().catch(()=>{});
     try { await Clipboard.setStringAsync(content); Alert.alert("Zkopírováno", "Odpověď je ve schránce."); } catch {}
   }
-  const Alert = require("react-native").Alert;
 
   if (loading) return <ScreenContainer><View style={{ padding: 20, gap: 12 }}><Shimmer height={20} width="60%" /><Shimmer height={14} /><Shimmer height={14} width="80%" /></View></ScreenContainer>;
   if (!isAuthenticated) return <ScreenContainer className="p-5 justify-center"><View style={[styles.emptyCard, { backgroundColor: colors.surface, borderColor: "rgba(255,255,255,0.08)" }]}><View style={[styles.emptyIcon, { backgroundColor: `${colors.primary}14` }]}><MaterialIcons name="lock" size={28} color={colors.primary} /></View><Text style={[styles.emptyTitle, { color: colors.foreground }]}>Přihlášení je potřeba</Text><Text style={[styles.emptyText, { color: colors.muted }]}>Asistent pracuje jen s tvými materiály.</Text><Pressable onPress={() => void startPrivateLogin()} style={({ pressed }) => [styles.loginBtn, { opacity: pressed ? 0.9 : 1, transform: [{ scale: pressed ? 0.97 : 1 }] }]}><LinearGradient colors={["#3B82F6","#6366F1"]} style={StyleSheet.absoluteFill as any} /><Text style={styles.loginText}>Přihlásit se</Text></Pressable></View></ScreenContainer>;
@@ -197,9 +255,13 @@ export default function AssistantScreen() {
           )}
           ListFooterComponent={sending ? <Animated.View entering={FadeInUp.duration(300)} style={[styles.thinking, { backgroundColor: colors.surface, borderColor: "rgba(255,255,255,0.08)" }]}><View style={styles.thinkingDots}><View style={[styles.dot, { backgroundColor: colors.primary }]} /><View style={[styles.dot, { backgroundColor: colors.primary, opacity: 0.6 }]} /><View style={[styles.dot, { backgroundColor: colors.primary, opacity: 0.3 }]} /></View><Text style={[styles.thinkingText, { color: colors.muted }]}>Procházím tvé albumy…</Text></Animated.View> : null}
         />
+        {pendingActions.length ? <View style={[styles.pendingPanel, { backgroundColor: `${colors.warning}12`, borderColor: `${colors.warning}55` }]}>
+          <View style={styles.pendingHeader}><MaterialIcons name="verified-user" size={18} color={colors.warning} /><Text style={[styles.pendingTitle, { color: colors.foreground }]}>Akce čeká na potvrzení</Text></View>
+          {pendingActions.map((action) => <View key={action.confirmationId ?? action.tool} style={styles.pendingAction}><View style={styles.pendingCopy}><Text style={[styles.pendingActionTitle, { color: colors.foreground }]}>{ACTION_LABELS[action.tool] ?? action.tool}</Text><Text style={[styles.pendingActionText, { color: colors.muted }]}>{typeof action.summary === "string" && action.summary ? action.summary : action.tool === "publish_to_youtube" ? "Veřejná změna se zatím neprovedla." : "Čeká na tvoje potvrzení."}</Text></View>{isConfirmableAction(action.tool) && action.confirmationId && action.confirmationToken ? <Pressable disabled={confirming} onPress={() => void confirmAction(action)} style={({ pressed }) => [styles.confirmButton, { opacity: confirming || pressed ? 0.6 : 1 }]}><Text style={styles.confirmButtonText}>{confirming ? "Ověřuji…" : "Potvrdit"}</Text></Pressable> : null}</View>)}
+        </View> : null}
         {error ? <Animated.View entering={FadeInDown.duration(300)} style={[styles.errorBox, { backgroundColor: "rgba(239,68,68,0.10)", borderColor: "rgba(239,68,68,0.22)" }]}><MaterialIcons name="error-outline" size={16} color={colors.error} /><Text style={[styles.errorText, { color: colors.error }]}>{error}</Text></Animated.View> : null}
         <View style={[styles.composer, { backgroundColor: colors.surface, borderColor: "rgba(255,255,255,0.08)", shadowColor: "#000", shadowOpacity: 0.16, shadowRadius: 16, elevation: 8, paddingBottom: insets.bottom ? 8 : 8 }]}>
-          <TextInput value={draft} onChangeText={setDraft} editable={!inputDisabled} multiline maxLength={1000} placeholder="Zadej úkol pro Temney Agenta…" placeholderTextColor={colors.muted} style={[styles.input, { color: colors.foreground }]} />
+          <TextInput value={draft} onChangeText={setDraft} editable={!inputDisabled} multiline maxLength={1000} placeholder="Zeptej se na skladby, texty nebo alba…" placeholderTextColor={colors.muted} style={[styles.input, { color: colors.foreground }]} />
           <Pressable onPress={() => void send()} disabled={!draft.trim() || inputDisabled} style={({ pressed }) => [styles.send, { backgroundColor: !draft.trim() || inputDisabled ? "rgba(255,255,255,0.08)" : colors.primary, opacity: pressed ? 0.9 : 1, transform: [{ scale: pressed && draft.trim() ? 0.97 : 1 }] }]}>
             <MaterialIcons name="arrow-upward" size={20} color={!draft.trim() || inputDisabled ? colors.muted : "#FFFFFF"} />
           </Pressable>
@@ -244,6 +306,15 @@ const styles = StyleSheet.create({
   thinkingDots: { flexDirection: "row", gap: 4, alignItems: "center" },
   dot: { width: 6, height: 6, borderRadius: 3 },
   thinkingText: { fontSize: 12, fontWeight: "600" },
+  pendingPanel: { borderWidth: 1, borderRadius: 16, padding: 12, marginBottom: 8, gap: 10 },
+  pendingHeader: { flexDirection: "row", alignItems: "center", gap: 7 },
+  pendingTitle: { fontSize: 13, fontWeight: "800" },
+  pendingAction: { flexDirection: "row", alignItems: "center", gap: 10 },
+  pendingCopy: { flex: 1, gap: 2 },
+  pendingActionTitle: { fontSize: 13, fontWeight: "800" },
+  pendingActionText: { fontSize: 11, lineHeight: 15 },
+  confirmButton: { minHeight: 40, paddingHorizontal: 13, borderRadius: 12, backgroundColor: "#F59E0B", alignItems: "center", justifyContent: "center" },
+  confirmButtonText: { color: "#141317", fontSize: 12, fontWeight: "900" },
   errorBox: { flexDirection: "row", gap: 8, alignItems: "center", borderWidth: 1, borderRadius: 12, padding: 12, marginBottom: 8 },
   errorText: { flex: 1, fontSize: 12, fontWeight: "500" },
   composer: { flexDirection: "row", alignItems: "flex-end", gap: 10, borderWidth: 1, borderRadius: 20, padding: 8, marginBottom: 8, marginTop: 4 },

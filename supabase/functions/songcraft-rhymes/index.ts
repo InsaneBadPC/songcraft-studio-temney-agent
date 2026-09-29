@@ -1,5 +1,6 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "jsr:@supabase/supabase-js@2";
+import { isAllowedPrivateUser, privateAccessMessage } from "../_shared/access.ts";
 
 const cors = { "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type", "Access-Control-Allow-Methods": "POST, OPTIONS" };
 const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { ...cors, "Content-Type": "application/json" } });
@@ -14,14 +15,16 @@ Deno.serve(async (request) => {
   if (!authorization) return json({ error: "Chybí přihlášení." }, 401);
   if (!geminiKey) return json({ error: "Hledač rýmů není správně nakonfigurován." }, 503);
 
-  const supabase = createClient(Deno.env.get("SUPABASE_URL") ?? "", Deno.env.get("SUPABASE_ANON_KEY") ?? "", { global: { headers: { Authorization: authorization } } });
+  const supabase = createClient(Deno.env.get("SUPABASE_URL") || Deno.env.get("SONGCRAFT_SUPABASE_URL") || "", Deno.env.get("SUPABASE_ANON_KEY") || Deno.env.get("SONGCRAFT_SUPABASE_ANON_KEY") || "", { global: { headers: { Authorization: authorization } } });
   const { data: { user }, error: authError } = await supabase.auth.getUser();
   if (authError || !user) return json({ error: "Neplatné přihlášení." }, 401);
+  if (!isAllowedPrivateUser(user, { allowedUserIds: Deno.env.get("SONGCRAFT_ALLOWED_USER_IDS") ?? undefined, allowedEmails: Deno.env.get("SONGCRAFT_ALLOWED_EMAILS") ?? undefined })) return json({ error: privateAccessMessage() }, 403);
 
   const input = await request.json().catch(() => null) as { word?: string; exclude?: unknown } | null;
   const word = clean(input?.word);
   if (!word || word.length < 2) return json({ error: "Zadej hledané slovo." }, 400);
-  const exclude = Array.isArray(input.exclude) ? input.exclude.map(clean).filter(Boolean).slice(0, 60) : [];
+  const excludeValues = input && Array.isArray(input.exclude) ? input.exclude : [];
+  const exclude = excludeValues.map(clean).filter(Boolean).slice(0, 60);
   const endingMatch = /[aáeéěiíoóuúůyý][^aáeéěiíoóuúůyý]*$/i.exec(word);
   const ending = endingMatch ? endingMatch[0] : word.slice(-2);
   const lastVowelMatch = /[aáeéěiíoóuúůyý]/i.exec(ending);
@@ -46,9 +49,9 @@ Deno.serve(async (request) => {
     "Vrať POUZE JSON ve tvaru {\"exact\":[\"…\"],\"multiword\":[\"…\"],\"assonance\":[\"…\"]} — exact max 12, multiword max 12, assonance max 8 položek, bez vysvětlení.",
   ].join("\n");
 
-  const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent?key=${encodeURIComponent(geminiKey)}`, {
+  const response = await fetch("https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent", {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", "x-goog-api-key": geminiKey },
     body: JSON.stringify({
       systemInstruction: { parts: [{ text: instruction }] },
       contents: [{ role: "user", parts: [{ text: `Rýmy ke slovu: ${word}` }] }],

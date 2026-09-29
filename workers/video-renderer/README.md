@@ -1,14 +1,31 @@
-# Temney video renderer
+# Oracle video renderer
 
-Worker vyžaduje Node.js 20+, `ffmpeg` a přístup pouze přes serverový `SUPABASE_SERVICE_ROLE_KEY`.
+`worker.mjs` je jediný aktivní video worker pro novou `agent_videos` frontu.
 
-```bash
-sudo apt-get install -y ffmpeg
-export SUPABASE_URL=https://<project>.supabase.co
-export SUPABASE_SERVICE_ROLE_KEY=<server-only-key>
-node worker.mjs
-```
+## Nároky
 
-Worker atomicky vezme první `agent_videos.render_status = queued`, načte finální audio a artwork z privátního bucketu přes krátkodobý signed URL, vytvoří MP4 1280×720, nahraje jej zpět a nastaví stav `ready`. Při chybě uloží `failed` a text chyby. Klíč nikdy nepatří do mobilního klienta ani do repozitáře.
+- Node.js 20 nebo novější,
+- FFmpeg s `libx264` a AAC,
+- pro `image_animation`/`full_scenes` dashboard na loopbacku,
+- Supabase URL a service-role key pouze v root-only environment souboru.
 
-Pro trvalý běh použij systemd službu nebo Docker na vlastní VM. Pro polling fronty nepoužívej AI plánované relace.
+## Bezpečné spuštění
+
+1. zkopírovat `songcraft-renderer.service.example` do `/etc/systemd/system/`,
+2. vytvořit neprivilegovaného uživatele `songcraft-renderer`,
+3. uložit secrets do `/etc/songcraft-studio/renderer.env` s právy `600`,
+4. nastavit `WORK_DIR` na adresář, který service smí číst a zapisovat,
+5. spustit `systemctl daemon-reload && systemctl enable --now songcraft-renderer`.
+
+Nikdy neotevírat dashboard port veřejně. Worker používá pouze `http://127.0.0.1:8080` a
+Basic auth z environmentu.
+
+## Chování fronty
+
+- `static_cover` používá lokální FFmpeg,
+- `image_animation` a `full_scenes` volají Oracle dashboard přes loopback,
+- používá se pouze finální audio verze; preferuje se tagged copy,
+- výstup je soukromý Supabase Storage objekt s prefixem vlastníka,
+- lease expirovaný job se vrací do fronty,
+- po `max_attempts` se job označí `failed`,
+- starý `sc_video_jobs`/GitHub release pipeline se pro nové joby nepoužívá.

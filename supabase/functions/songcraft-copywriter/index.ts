@@ -1,5 +1,6 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "jsr:@supabase/supabase-js@2";
+import { isAllowedPrivateUser, privateAccessMessage } from "../_shared/access.ts";
 
 const cors = { "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type", "Access-Control-Allow-Methods": "POST, OPTIONS" };
 const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { ...cors, "Content-Type": "application/json" } });
@@ -9,8 +10,8 @@ Deno.serve(async (request) => {
   if (request.method === "OPTIONS") return new Response("ok", { headers: cors });
   if (request.method !== "POST") return json({ error: "Použij POST požadavek." }, 405);
   const authorization = request.headers.get("Authorization");
-  const url = Deno.env.get("SUPABASE_URL");
-  const anonKey = Deno.env.get("SUPABASE_ANON_KEY");
+  const url = Deno.env.get("SUPABASE_URL") || Deno.env.get("SONGCRAFT_SUPABASE_URL");
+  const anonKey = Deno.env.get("SUPABASE_ANON_KEY") || Deno.env.get("SONGCRAFT_SUPABASE_ANON_KEY");
   const geminiKey = Deno.env.get("GOOGLE_AI_STUDIO_KEY");
   if (!authorization || !url || !anonKey) return json({ error: "Chybí bezpečné připojení." }, 401);
   if (!geminiKey) return json({ error: "AI copywriter není správně nakonfigurován." }, 503);
@@ -18,21 +19,22 @@ Deno.serve(async (request) => {
   const supabase = createClient(url, anonKey, { global: { headers: { Authorization: authorization } } });
   const { data: { user }, error: authError } = await supabase.auth.getUser();
   if (authError || !user) return json({ error: "Neplatné přihlášení." }, 401);
+  if (!isAllowedPrivateUser(user, { allowedUserIds: Deno.env.get("SONGCRAFT_ALLOWED_USER_IDS") ?? undefined, allowedEmails: Deno.env.get("SONGCRAFT_ALLOWED_EMAILS") ?? undefined })) return json({ error: privateAccessMessage() }, 403);
 
   const input = await request.json().catch(() => null) as { action?: string; songId?: string } | null;
   if (!input?.action || !input.songId) return json({ error: "Chybí skladba nebo akce." }, 400);
   if (!["description", "tags"].includes(input.action)) return json({ error: "Neznámá akce." }, 400);
 
-  const admin = createClient(url, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? anonKey);
+  const admin = createClient(url, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || Deno.env.get("SONGCRAFT_SERVICE_ROLE_KEY") || anonKey);
   const { data: song, error: songError } = await admin.from("sc_songs").select("id,user_id,title,style_prompt,style_prompts,lyrics,album_id").eq("id", input.songId).single();
   if (songError || !song || song.user_id !== user.id) return json({ error: "Skladba nebyla nalezena." }, 404);
 
   let albumName = "";
   if (song.album_id) {
-    const { data: album } = await admin.from("sc_albums").select("name").eq("id", song.album_id).single();
+    const { data: album } = await admin.from("sc_albums").select("name").eq("id", song.album_id).eq("user_id", user.id).maybeSingle();
     albumName = clip(album?.name, 120);
   }
-  const stylePrompts = Array.isArray(song.style_prompts) ? song.style_prompts.filter((entry: unknown): entry is string => typeof entry === "string" && entry.trim()).map((entry: string) => clip(entry, 400)) : [];
+  const stylePrompts = Array.isArray(song.style_prompts) ? song.style_prompts.filter((entry: unknown): entry is string => typeof entry === "string" && entry.trim().length > 0).map((entry: string) => clip(entry, 400)) : [];
   if (song.style_prompt && !stylePrompts.includes(clip(song.style_prompt, 400))) stylePrompts.unshift(clip(song.style_prompt, 400));
 
   const contextLines = [
@@ -60,9 +62,9 @@ Deno.serve(async (request) => {
         "Vrať POUZE tagy oddělené čárkou, bez číslování, bez mřížek, bez dalšího textu.",
       ].join("\n");
 
-  const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-lite:generateContent?key=${encodeURIComponent(geminiKey)}`, {
+  const response = await fetch("https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-lite:generateContent", {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", "x-goog-api-key": geminiKey },
     body: JSON.stringify({
       systemInstruction: { parts: [{ text: `${instruction}\n\nMATERIÁL SKLADBY:\n${contextLines}` }] },
       contents: [{ role: "user", parts: [{ text: input.action === "description" ? "Napiš popis videa na YouTube." : "Navrhni tagy." }] }],

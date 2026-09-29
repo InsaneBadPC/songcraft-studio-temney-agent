@@ -1,7 +1,6 @@
 import MaterialIcons from "@expo/vector-icons/MaterialIcons";
-import * as ImagePicker from "expo-image-picker";
 import { router } from "expo-router";
-import { memo, useEffect, useMemo, useState } from "react";
+import { memo, useEffect, useMemo, useRef, useState } from "react";
 import { useFocusEffect } from "expo-router";
 import { Alert, Image, KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 
@@ -10,18 +9,20 @@ import { RhymeFinder } from "@/components/rhyme-finder";
 import { ScreenContainer } from "@/components/screen-container";
 import { useAuth } from "@/hooks/use-auth";
 import { useColors } from "@/hooks/use-colors";
-import { assetToBase64 } from "@/lib/file-base64";
-import { clearDraft, loadDraft, useDraftStorage } from "@/lib/use-draft-storage";
+import { pickImage, pickVideo } from "@/lib/pick-media";
+import { clearDraft, loadDraft, shouldRestoreDraft, useDraftStorage } from "@/lib/use-draft-storage";
 import { takePickedStylePrompt } from "@/lib/style-prompt-picker";
 import { trpc } from "@/lib/trpc";
+import { useUndoableText } from "@/lib/use-undoable-text";
 
-type SongForm = { title: string; albumId: string | null; stylePrompts: string[]; lyrics: string; notes: string; coverStorageKey: string | null; coverUrl: string | null };
-const emptyForm: SongForm = { title: "", albumId: null, stylePrompts: [""], lyrics: "", notes: "", coverStorageKey: null, coverUrl: null };
+type SongForm = { title: string; albumId: string | null; stylePrompts: string[]; lyrics: string; notes: string; coverStorageKey: string | null; coverUrl: string | null; sourceVideoStorageKey: string | null };
+const emptyForm: SongForm = { title: "", albumId: null, stylePrompts: [""], lyrics: "", notes: "", coverStorageKey: null, coverUrl: null, sourceVideoStorageKey: null };
 
 export function SongEditor({ songId }: { songId?: string }) {
   const colors = useColors();
-  const { isAuthenticated } = useAuth();
+  const { isAuthenticated, user } = useAuth();
   const utils = trpc.useUtils();
+  const userId = user?.id ?? null;
   const snapshot = trpc.studio.snapshot.useQuery(undefined, { enabled: isAuthenticated });
   const song = useMemo(() => snapshot.data?.songs.find((entry) => entry.id === songId), [snapshot.data?.songs, songId]);
   const [form, setForm] = useState<SongForm>(emptyForm);
@@ -36,28 +37,72 @@ export function SongEditor({ songId }: { songId?: string }) {
   const [coverDialogVisible, setCoverDialogVisible] = useState(false);
   const [coverNote, setCoverNote] = useState("");
   const [draftRestored, setDraftRestored] = useState(false);
+  const [draftReady, setDraftReady] = useState(false);
+  const draftRunRef = useRef(0);
+  const lyricsHistory = useUndoableText("");
+  const { reset: resetLyricsHistory } = lyricsHistory;
   const albumName = snapshot.data?.albums.find((album) => album.id === form.albumId)?.name ?? "Bez alba";
+  const songUpdatedAt = song?.updatedAt instanceof Date ? song.updatedAt.getTime() : song?.updatedAt ? new Date(song.updatedAt as unknown as string).getTime() : null;
+  const songStylePromptsKey = Array.isArray(song?.stylePrompts) ? song.stylePrompts.join("\u0000") : null;
 
-  useEffect(() => { if (song) setForm({ title: song.title, albumId: song.albumId, stylePrompts: song.stylePrompts.length ? [...song.stylePrompts] : [""], lyrics: song.lyrics ?? "", notes: song.notes ?? "", coverStorageKey: song.coverStorageKey, coverUrl: song.coverUrl }); }, [song]);
-  useDraftStorage(form, songId ?? null);
   useEffect(() => {
-    let cancelled = false;
-    if (songId) {
-      void loadDraft(songId).then((draft) => {
-        if (cancelled || !draft) return;
-        const serverNewer = song && new Date(song.updatedAt).getTime() >= draft.savedAt;
-        if (!serverNewer) {
-          setForm((current) => ({ ...current, title: draft.title, albumId: draft.albumId, stylePrompts: draft.stylePrompts?.length ? draft.stylePrompts : [draft.stylePrompt || ""], lyrics: draft.lyrics, notes: draft.notes, coverStorageKey: draft.coverStorageKey, coverUrl: draft.coverUrl }));
-          setDraftRestored(true);
-        } else { void clearDraft(songId); }
-      });
+    const run = ++draftRunRef.current;
+    setDraftReady(false);
+    setDraftRestored(false);
+    if (!userId) {
+      setForm(emptyForm);
+      resetLyricsHistory("");
+      return;
     }
+    if (songId && snapshot.isLoading) {
+      setForm(emptyForm);
+      resetLyricsHistory("");
+      return;
+    }
+    if (songId && !song) {
+      setForm(emptyForm);
+      resetLyricsHistory("");
+      setDraftReady(false);
+      return;
+    }
+
+    const serverForm: SongForm = song ? {
+      title: song.title,
+      albumId: song.albumId,
+      stylePrompts: Array.isArray(song.stylePrompts) && song.stylePrompts.length ? [...song.stylePrompts] : [""],
+      lyrics: song.lyrics ?? "",
+      notes: song.notes ?? "",
+      coverStorageKey: song.coverStorageKey,
+      sourceVideoStorageKey: song.sourceVideoStorageKey,
+      coverUrl: song.coverUrl,
+    } : emptyForm;
+    setForm(serverForm);
+    resetLyricsHistory(serverForm.lyrics);
+
+    let cancelled = false;
+    void loadDraft(songId ?? null, userId, "song").then((draft) => {
+      if (cancelled || run !== draftRunRef.current) return;
+      if (draft && shouldRestoreDraft(songUpdatedAt, draft.savedAt)) {
+        setForm({ title: draft.title, albumId: draft.albumId, stylePrompts: draft.stylePrompts?.length ? draft.stylePrompts : [draft.stylePrompt || ""], lyrics: draft.lyrics, notes: draft.notes, coverStorageKey: draft.coverStorageKey, coverUrl: draft.coverUrl, sourceVideoStorageKey: draft.sourceVideoStorageKey ?? null });
+        resetLyricsHistory(draft.lyrics);
+        setDraftRestored(true);
+      } else if (draft) {
+        void clearDraft(songId ?? null, userId, "song");
+      }
+      setDraftReady(true);
+    });
+
     return () => { cancelled = true; };
-  }, [songId]);
+    // Server fields are listed individually so a new cache object does not wipe an unsaved form.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [resetLyricsHistory, song?.albumId, song?.coverStorageKey, song?.coverUrl, song?.id, song?.lyrics, song?.notes, song?.sourceVideoStorageKey, song?.title, songId, songStylePromptsKey, songUpdatedAt, snapshot.isLoading, userId]);
+
+  useDraftStorage(form, songId ?? null, userId, draftReady, "song");
   useFocusEffect(useMemo(() => () => {
     const picked = takePickedStylePrompt();
     if (picked) setForm((current) => ({ ...current, stylePrompts: [...current.stylePrompts.filter((entry) => entry.trim()), picked] }));
   }, []));
+  if (isAuthenticated && userId && !draftReady && (!songId || song)) return <ScreenContainer><LoadingState /></ScreenContainer>;
   if (songId && snapshot.isLoading) return <ScreenContainer><LoadingState /></ScreenContainer>;
   if (songId && !song) return <ScreenContainer className="p-6 justify-center"><Text style={[styles.error, { color: colors.muted }]}>Skladba nebyla nalezena.</Text></ScreenContainer>;
 
@@ -66,10 +111,10 @@ export function SongEditor({ songId }: { songId?: string }) {
     setSaving(true);
     try {
       const stylePrompts = form.stylePrompts.map((entry) => entry.trim()).filter(Boolean);
-      const payload = { title: form.title.trim(), albumId: form.albumId, stylePrompts, lyrics: form.lyrics || null, notes: form.notes || null, coverStorageKey: form.coverStorageKey, coverUrl: form.coverUrl };
+      const payload = { title: form.title.trim(), albumId: form.albumId, stylePrompts, lyrics: form.lyrics || null, notes: form.notes || null, coverStorageKey: form.coverStorageKey, coverUrl: form.coverUrl, sourceVideoStorageKey: form.sourceVideoStorageKey };
       const savedId = songId ? (await update.mutateAsync({ id: songId, ...payload }), songId) : await create.mutateAsync(payload);
-      await clearDraft(songId ?? null);
-      await clearDraft(savedId);
+      await clearDraft(songId ?? null, userId, "song");
+      await clearDraft(savedId, userId, "song");
       setDraftRestored(false);
       await utils.studio.snapshot.invalidate();
       router.replace(`/song/${savedId}` as never);
@@ -78,9 +123,35 @@ export function SongEditor({ songId }: { songId?: string }) {
   const uploadCover = async () => {
     // Androidův vestavěný editor může i při zadaném 16:9 vynutit čtvercový ořez.
     // Obrázek proto jen vybereme a celou kompozici zachováme v 16:9 rámečku.
-    const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ["images"], allowsEditing: false, quality: 0.92, base64: true });
-    if (result.canceled) return;
-    try { const asset = result.assets[0]; const base64 = await assetToBase64(asset.uri, asset.base64); const uploaded = await upload.mutateAsync({ folder: "covers", fileName: asset.fileName ?? `song-cover-${Date.now()}.jpg`, contentType: asset.mimeType ?? "image/jpeg", base64 }); setForm((current) => ({ ...current, coverStorageKey: uploaded.key, coverUrl: uploaded.url })); } catch (error) { Alert.alert("Obrázek se nepodařilo nahrát", error instanceof Error ? error.message : "Zkus jiný obrázek."); }
+    try {
+      const picked = await pickImage();
+      if (!picked) return;
+      const uploaded = await upload.mutateAsync({
+        folder: "covers",
+        fileName: picked.fileName,
+        contentType: picked.mimeType,
+        bytes: picked.bytes,
+      });
+      setForm((current) => ({ ...current, coverStorageKey: uploaded.key, coverUrl: uploaded.url }));
+    } catch (error) {
+      Alert.alert("Obrázek se nepodařilo nahrát", error instanceof Error ? error.message : "Zkus jiný obrázek.");
+    }
+  };
+  const uploadVideo = async () => {
+    try {
+      const picked = await pickVideo();
+      if (!picked) return;
+      const uploaded = await upload.mutateAsync({
+        folder: "videos",
+        fileName: picked.fileName,
+        contentType: picked.mimeType,
+        bytes: picked.bytes,
+      });
+      setForm((current) => ({ ...current, sourceVideoStorageKey: uploaded.key }));
+      Alert.alert("Video je nahrané", "Render z něj udělá smyčku přes celou skladbu.");
+    } catch (error) {
+      Alert.alert("Video se nepodařilo nahrát", error instanceof Error ? error.message : "Zkus jiné video.");
+    }
   };
   const openCoverDialog = () => {
     if (!songId) { Alert.alert("Nejprve skladbu ulož", "Nejdřív ulož název, album a text. Pak může aplikace vytvořit obal z přesně těchto uložených údajů."); return; }
@@ -112,10 +183,22 @@ export function SongEditor({ songId }: { songId?: string }) {
       Alert.alert("Uloženo do databáze", "Prompt najdeš v databázi promptů stylu a můžeš ho použít u další skladby.");
     } catch (error) { Alert.alert("Uložení se nezdařilo", error instanceof Error ? error.message : "Zkus to znovu."); }
   };
+  const updateLyrics = (lyrics: string, coalesce = true) => {
+    lyricsHistory.change(lyrics, coalesce);
+    setForm((current) => ({ ...current, lyrics }));
+  };
+  const undoLyrics = () => {
+    const lyrics = lyricsHistory.undo();
+    if (lyrics !== undefined) setForm((current) => ({ ...current, lyrics }));
+  };
+  const redoLyrics = () => {
+    const lyrics = lyricsHistory.redo();
+    if (lyrics !== undefined) setForm((current) => ({ ...current, lyrics }));
+  };
 
   return <ScreenContainer edges={["top", "bottom", "left", "right"]}><KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : "height"} keyboardVerticalOffset={0} style={{ flex: 1 }}><ScrollView contentContainerStyle={[styles.content, { paddingBottom: 180 }]} keyboardShouldPersistTaps="handled" keyboardDismissMode="interactive" automaticallyAdjustKeyboardInsets>{draftRestored ? <View style={[styles.draftNotice, { backgroundColor: `${colors.accent}14`, borderColor: `${colors.accent}55` }]}><MaterialIcons name="restore" size={16} color={colors.accent} /><Text style={[styles.draftNoticeText, { color: colors.foreground }]}>Obnoven rozpracovaný text — klepni na Uložit pro potvrzení.</Text></View> : null}<View style={styles.topbar}><IconButton label="Zpět" icon="arrow-back" onPress={() => router.back()} /><Text numberOfLines={1} style={[styles.topbarName, { color: colors.foreground }]}>{songId ? "Upravit skladbu" : "Nová skladba"}</Text><Pressable onPress={() => void save()} style={({ pressed }) => [styles.save, { opacity: saving || pressed ? 0.6 : 1 }]}><Text style={[styles.saveText, { color: colors.primary }]}>{saving ? "Ukládám" : "Uložit"}</Text></Pressable></View>
     <View style={[styles.flow, { backgroundColor: `${colors.primary}13`, borderColor: `${colors.primary}45` }]}><MaterialIcons name="account-tree" size={20} color={colors.primary} /><Text style={[styles.flowText, { color: colors.muted }]}>Tato položka drží pohromadě text, obrázek, MP3 verze, metadata a album.</Text></View>
-    <View style={styles.coverBlock}><Pressable onPress={() => void uploadCover()} style={({ pressed }) => [styles.cover, { borderColor: colors.border, backgroundColor: colors.surface, opacity: pressed ? 0.72 : 1 }]}>{form.coverUrl ? <Image source={{ uri: form.coverUrl }} style={styles.coverImage} resizeMode="contain" /> : <><View style={[styles.coverIcon, { backgroundColor: `${colors.primary}20` }]}><MaterialIcons name="add-photo-alternate" size={25} color={colors.primary} /></View><Text style={[styles.coverTitle, { color: colors.foreground }]}>Přidat vlastní obrázek skladby</Text><Text style={[styles.coverText, { color: colors.muted }]}>Celá kompozice bez ořezu v 16:9 pro katalog i YouTube video.</Text></>}</Pressable><Pressable onPress={openCoverDialog} disabled={coverGenerating} style={({ pressed }) => [styles.generateCover, { borderColor: colors.primary, backgroundColor: `${colors.primary}12`, opacity: coverGenerating || pressed ? 0.62 : 1 }]}><MaterialIcons name={coverGenerating ? "hourglass-top" : "auto-awesome"} size={19} color={colors.primary} /><View style={styles.generateCopy}><Text style={[styles.generateTitle, { color: colors.primary }]}>{coverGenerating ? "Bezplatná AI vytváří 16:9 obal…" : "Vygenerovat obrázek skladby"}</Text><Text style={[styles.generateText, { color: colors.muted }]}>{songId ? "16:9 obraz s pevně vloženým Temney, albem a názvem skladby." : "Nejprve skladbu ulož, pak můžeš vytvořit obal."}</Text></View></Pressable></View>
+    <View style={styles.coverBlock}><Pressable onPress={() => void uploadCover()} style={({ pressed }) => [styles.cover, { borderColor: colors.border, backgroundColor: colors.surface, opacity: pressed ? 0.72 : 1 }]}>{form.coverUrl ? <Image source={{ uri: form.coverUrl }} style={styles.coverImage} resizeMode="contain" /> : <><View style={[styles.coverIcon, { backgroundColor: `${colors.primary}20` }]}><MaterialIcons name="add-photo-alternate" size={25} color={colors.primary} /></View><Text style={[styles.coverTitle, { color: colors.foreground }]}>Přidat vlastní obrázek skladby</Text><Text style={[styles.coverText, { color: colors.muted }]}>Celá kompozice bez ořezu v 16:9 pro katalog i YouTube video.</Text></>}</Pressable><Pressable onPress={openCoverDialog} disabled={coverGenerating} style={({ pressed }) => [styles.generateCover, { borderColor: colors.primary, backgroundColor: `${colors.primary}12`, opacity: coverGenerating || pressed ? 0.62 : 1 }]}><MaterialIcons name={coverGenerating ? "hourglass-top" : "auto-awesome"} size={19} color={colors.primary} /><View style={styles.generateCopy}><Text style={[styles.generateTitle, { color: colors.primary }]}>{coverGenerating ? "Bezplatná AI vytváří 16:9 obal…" : "Vygenerovat obrázek skladby"}</Text><Text style={[styles.generateText, { color: colors.muted }]}>{songId ? "16:9 obraz s pevně vloženým Temney, albem a názvem skladby." : "Nejprve skladbu ulož, pak můžeš vytvořit obal."}</Text></View></Pressable><Pressable onPress={() => void uploadVideo()} style={({ pressed }) => [styles.generateCover, { borderColor: colors.border, backgroundColor: `${colors.muted}12`, opacity: pressed ? 0.62 : 1 }]}><MaterialIcons name={form.sourceVideoStorageKey ? "movie" : "video-library"} size={19} color={colors.muted} /><View style={styles.generateCopy}><Text style={[styles.generateTitle, { color: colors.muted }]}>{form.sourceVideoStorageKey ? "Video skladby je nahrané" : "Nahrát video místo obrázku"}</Text><Text style={[styles.generateText, { color: colors.muted }]}>Z krátkého MP4 udělá render smyčku přes celou skladbu.</Text></View></Pressable></View>
     <Field label="Název skladby" value={form.title} onChangeText={(title) => setForm((current) => ({ ...current, title }))} placeholder="Např. Noční signál" autoFocus={!songId} colors={colors} />
     <SectionTitle title="Album" />
     <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.albumChips}><AlbumChip active={!form.albumId} label="Bez alba" onPress={() => setForm((current) => ({ ...current, albumId: null }))} />{snapshot.data?.albums.map((album) => <AlbumChip key={album.id} active={form.albumId === album.id} label={album.name} onPress={() => setForm((current) => ({ ...current, albumId: album.id }))} />)}</ScrollView>
@@ -130,10 +213,11 @@ export function SongEditor({ songId }: { songId?: string }) {
       </View>
     ))}
     <Pressable onPress={() => setForm((current) => ({ ...current, stylePrompts: [...current.stylePrompts, ""] }))} style={({ pressed }) => [styles.addPrompt, { borderColor: colors.primary, opacity: pressed ? 0.62 : 1 }]}><MaterialIcons name="add" size={19} color={colors.primary} /><Text style={[styles.addPromptText, { color: colors.primary }]}>Přidat další prompt</Text></Pressable>
-    <Field label="Samotný text písně" value={form.lyrics} onChangeText={(lyrics) => setForm((current) => ({ ...current, lyrics }))} placeholder="[Sloka 1]\n…" multiline tall colors={colors} />
+    <View style={styles.lyricsHead}><Text style={[styles.lyricsLabel, { color: colors.foreground }]}>Text písně</Text><View style={styles.historyRow}><Pressable onPress={undoLyrics} disabled={!lyricsHistory.canUndo} style={({ pressed }) => [styles.historyButton, { borderColor: colors.border, backgroundColor: colors.surface, opacity: !lyricsHistory.canUndo || pressed ? 0.4 : 1 }]}><MaterialIcons name="undo" size={18} color={colors.primary} /><Text style={[styles.historyButtonText, { color: colors.primary }]}>Zpět</Text></Pressable><Pressable onPress={redoLyrics} disabled={!lyricsHistory.canRedo} style={({ pressed }) => [styles.historyButton, { borderColor: colors.border, backgroundColor: colors.surface, opacity: !lyricsHistory.canRedo || pressed ? 0.4 : 1 }]}><MaterialIcons name="redo" size={18} color={colors.primary} /><Text style={[styles.historyButtonText, { color: colors.primary }]}>Vpřed</Text></Pressable></View></View>
+     <TextInput value={lyricsHistory.value} onChangeText={updateLyrics} placeholder="[Sloka 1]\n…" multiline textAlignVertical="top" disableFullscreenUI style={[styles.input, styles.tall, { color: colors.foreground, backgroundColor: colors.surface, borderColor: colors.border }]} />
     <Field label="Poznámky" value={form.notes} onChangeText={(notes) => setForm((current) => ({ ...current, notes }))} placeholder="Aranž, reference, nápady na klip…" multiline colors={colors} />
     <Pressable onPress={() => void save()} style={({ pressed }) => [styles.saveButton, { backgroundColor: colors.primary, opacity: saving || pressed ? 0.68 : 1 }]}><MaterialIcons name="save" size={20} color="#141317" /><Text style={styles.saveButtonText}>{saving ? "Ukládám skladbu…" : "Uložit položku skladby"}</Text></Pressable>
-  </ScrollView></KeyboardAvoidingView><RhymeFinder variant="floating" onInsert={(word) => setForm((current) => ({ ...current, lyrics: `${current.lyrics}${current.lyrics && !/\s$/.test(current.lyrics) ? " " : ""}${word}` }))} /><CoverGenerationDialog visible={coverDialogVisible} title={form.title} albumName={albumName} lyrics={form.lyrics} note={coverNote} onChangeNote={setCoverNote} onClose={() => setCoverDialogVisible(false)} onGenerate={() => void generateCover()} colors={colors} /></ScreenContainer>;
+  </ScrollView></KeyboardAvoidingView><RhymeFinder variant="floating" onInsert={(word) => { const next = `${lyricsHistory.value}${lyricsHistory.value && !/\s$/.test(lyricsHistory.value) ? " " : ""}${word}`; updateLyrics(next, false); }} /><CoverGenerationDialog visible={coverDialogVisible} title={form.title} albumName={albumName} lyrics={form.lyrics} note={coverNote} onChangeNote={setCoverNote} onClose={() => setCoverDialogVisible(false)} onGenerate={() => void generateCover()} colors={colors} /></ScreenContainer>;
 }
 
 function CoverGenerationDialog({ visible, title, albumName, lyrics, note, onChangeNote, onClose, onGenerate, colors }: { visible: boolean; title: string; albumName: string; lyrics: string; note: string; onChangeNote: (value: string) => void; onClose: () => void; onGenerate: () => void; colors: ReturnType<typeof useColors> }) {
@@ -154,4 +238,9 @@ const styles = StyleSheet.create({
   promptField: { flex: 1 },
   addPrompt: { minHeight: 44, borderWidth: 1, borderStyle: "dashed", borderRadius: 14, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 7 },
   addPromptText: { fontSize: 13.5, fontWeight: "800" },
+  lyricsHead: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginTop: 4 },
+  lyricsLabel: { fontSize: 15, fontWeight: "800" },
+  historyRow: { flexDirection: "row", gap: 7 },
+  historyButton: { height: 34, borderRadius: 12, borderWidth: 1, paddingHorizontal: 11, flexDirection: "row", alignItems: "center", gap: 5 },
+  historyButtonText: { fontSize: 12.5, fontWeight: "900" },
   coverBlock: { gap: 9 }, cover: { minHeight: 180, aspectRatio: 16 / 9, borderWidth: 1, borderRadius: 20, padding: 18, alignItems: "center", justifyContent: "center", gap: 6, overflow: "hidden" }, coverImage: { width: "100%", height: "100%", borderRadius: 13 }, coverIcon: { width: 47, height: 47, borderRadius: 15, alignItems: "center", justifyContent: "center" }, coverTitle: { fontSize: 15, fontWeight: "800" }, coverText: { fontSize: 12, textAlign: "center", lineHeight: 17 }, generateCover: { minHeight: 66, borderWidth: 1, borderRadius: 16, paddingHorizontal: 14, flexDirection: "row", alignItems: "center", gap: 10 }, generateCopy: { flex: 1, gap: 2 }, generateTitle: { fontSize: 14, fontWeight: "900" }, generateText: { fontSize: 11, lineHeight: 15 }, field: { gap: 7 }, fieldLabel: { fontSize: 15, fontWeight: "800" }, fieldHelper: { fontSize: 12, lineHeight: 17 }, input: { minHeight: 49, borderWidth: 1, borderRadius: 15, paddingHorizontal: 14, fontSize: 15 }, multiline: { minHeight: 116, paddingVertical: 13, lineHeight: 21 }, tall: { minHeight: 255 }, albumChips: { gap: 8, paddingRight: 20 }, albumChip: { borderWidth: 1, height: 37, borderRadius: 20, justifyContent: "center", paddingHorizontal: 14 }, albumChipText: { fontSize: 13, fontWeight: "700" }, saveButton: { minHeight: 53, borderRadius: 16, flexDirection: "row", gap: 8, alignItems: "center", justifyContent: "center" }, saveButtonText: { color: "#141317", fontSize: 15, fontWeight: "900" }, error: { fontSize: 15, textAlign: "center" }, modalShade: { flex: 1, justifyContent: "flex-end", backgroundColor: "rgba(0,0,0,0.58)" }, coverSheet: { maxHeight: "93%", borderTopLeftRadius: 28, borderTopRightRadius: 28, paddingTop: 9 }, sheetHandle: { height: 4, width: 40, borderRadius: 3, alignSelf: "center", marginBottom: 12 }, dialogTop: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: 20, paddingBottom: 12 }, dialogHeading: { flex: 1, flexDirection: "row", alignItems: "center", gap: 10 }, dialogIcon: { height: 38, width: 38, borderRadius: 13, alignItems: "center", justifyContent: "center" }, dialogTitle: { fontSize: 18, fontWeight: "900" }, dialogSubtitle: { fontSize: 12, marginTop: 2 }, dialogContent: { gap: 12, padding: 20, paddingTop: 4, paddingBottom: 40 }, dialogIntro: { fontSize: 12, lineHeight: 17 }, contextLine: { minHeight: 57, borderWidth: 1, borderRadius: 14, paddingHorizontal: 12, paddingVertical: 9, justifyContent: "center", gap: 3 }, contextBlock: { gap: 6 }, contextLabel: { fontSize: 11, fontWeight: "800", textTransform: "uppercase", letterSpacing: 0.35 }, contextValue: { fontSize: 14, fontWeight: "800" }, lyricsPreview: { borderWidth: 1, borderRadius: 14, padding: 12, minHeight: 78, fontSize: 13, lineHeight: 18 }, noteInput: { minHeight: 92, borderWidth: 1, borderRadius: 14, padding: 12, fontSize: 14, lineHeight: 19 }, guarantee: { borderWidth: 1, borderRadius: 14, padding: 12, flexDirection: "row", gap: 8, alignItems: "flex-start" }, guaranteeText: { flex: 1, fontSize: 12, fontWeight: "700", lineHeight: 17 }, dialogGenerate: { minHeight: 52, borderRadius: 16, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, marginTop: 2 }, dialogGenerateText: { color: "#141317", fontSize: 15, fontWeight: "900" } });

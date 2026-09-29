@@ -1,8 +1,8 @@
 import MaterialIcons from "@expo/vector-icons/MaterialIcons";
 import { LinearGradient } from "expo-linear-gradient";
 import * as Haptics from "expo-haptics";
-import { router } from "expo-router";
-import { useMemo, useState, useCallback } from "react";
+import { router, useLocalSearchParams } from "expo-router";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { FlatList, Pressable, RefreshControl, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import Animated, { FadeInDown, Layout } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -13,6 +13,7 @@ import { startPrivateLogin } from "@/constants/oauth";
 import { useAuth } from "@/hooks/use-auth";
 import { useColors } from "@/hooks/use-colors";
 import { trpc } from "@/lib/trpc";
+import { firstQueryParam } from "@/lib/query-params";
 import { TextImporter } from "@/components/text-importer";
 
 type Phase = "draft" | "album" | "mp3" | "published";
@@ -29,8 +30,11 @@ export default function TextsScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
   const { isAuthenticated, loading } = useAuth();
+  const { album: albumParam } = useLocalSearchParams<{ album?: string | string[] }>();
+  const albumFromQuery = firstQueryParam(albumParam);
   const [search, setSearch] = useState("");
-  const [albumId, setAlbumId] = useState<string | null>(null);
+  const [albumId, setAlbumId] = useState<string | null>(albumFromQuery);
+  useEffect(() => { setAlbumId(albumFromQuery); }, [albumFromQuery]);
   const [statusFilter, setStatusFilter] = useState<"all" | "draft" | "complete">("all");
   const [phaseFilter, setPhaseFilter] = useState<Phase | "all">("all");
   const snapshot = trpc.studio.snapshot.useQuery(undefined, { enabled: isAuthenticated });
@@ -50,7 +54,9 @@ export default function TextsScreen() {
     return "draft" as Phase;
   };
   const records = useMemo(() => allDocuments.filter((d) => {
-    if (albumId && d.albumId !== albumId) return false;
+    const linkedSong = snapshot.data?.songs.find((song) => song.sourceDocumentId === d.id);
+    const recordAlbumId = d.albumId ?? linkedSong?.albumId ?? null;
+    if (albumId && recordAlbumId !== albumId) return false;
     if (statusFilter !== "all" && d.status !== statusFilter) return false;
     if (phaseFilter !== "all" && phaseOf(d) !== phaseFilter) return false;
     return `${d.title} ${d.lyrics ?? ""} ${d.stylePrompt ?? ""}`.toLowerCase().includes(search.toLowerCase());

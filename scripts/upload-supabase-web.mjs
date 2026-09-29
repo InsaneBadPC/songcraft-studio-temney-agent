@@ -2,8 +2,16 @@ import { readdir, readFile } from "node:fs/promises";
 import { join, relative } from "node:path";
 
 const root = new URL("../dist-web/", import.meta.url).pathname;
-const supabaseUrl = "https://hfykngbhcxmnpxvjagoj.supabase.co";
-const deployToken = "scweb-20260821-8c1e9bb4-02b9-4852-a120-298dff715f63";
+const supabaseUrl = process.env.SONGCRAFT_SUPABASE_URL || "https://hfykngbhcxmnpxvjagoj.supabase.co";
+const webBucket = "songcraft-web";
+// Deploy token se NESMÍ držet v repu. Bere se z prostředí a bez něj skript
+// fail-closed skončí, místo aby vypisoval nějaký výchozí hodnotný token.
+const deployToken = process.env.SONGCRAFT_WEB_DEPLOY_TOKEN;
+if (!deployToken) {
+  throw new Error(
+    "Chybí SONGCRAFT_WEB_DEPLOY_TOKEN. Token patří do prostředí / GitHub Secrets, ne do repozitáře.",
+  );
+}
 
 const contentType = (path) => {
   if (path.endsWith(".html")) return "text/html; charset=utf-8";
@@ -47,4 +55,4 @@ for (const file of files) {
   console.log(`Nahráno: ${path}`);
 }
 
-console.log(`Web je dostupný na ${supabaseUrl}/storage/v1/object/public/${bucket}/index.html`);
+console.log(`Web je dostupný na ${supabaseUrl}/storage/v1/object/public/${webBucket}/index.html`);

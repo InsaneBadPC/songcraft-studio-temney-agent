@@ -8,6 +8,10 @@ const REPO = "InsaneBadPC/songcraft-studio-temney-agent";
 const RELEASES_API = `https://api.github.com/repos/${REPO}/releases?per_page=30`;
 const APK_MIME = "application/vnd.android.package-archive";
 const SKIPPED_VERSION_KEY = "songcraft.skippedUpdateVersion";
+const CHECK_CACHE_KEY = "songcraft.updateCheck";
+// GitHub API bez tokenu má 60 požadavků na hodinu na IP — kontrolu proto
+// throttlujeme a výsledek (včetně „žádná aktualizace“) cachujeme.
+const MIN_CHECK_INTERVAL_MS = 30 * 60 * 1000;
 
 export const CURRENT_VERSION: string = Constants.expoConfig?.version ?? "0.0.0";
 
@@ -47,8 +51,41 @@ export function isNewerVersion(candidate: string, current: string): boolean {
 }
 
 // Vrátí informace o novější verzi, nebo null když je aplikace aktuální.
-export async function checkForUpdate(): Promise<AppUpdate | null> {
+// `force: true` obejde throttle (ruční tlačítko v Nastavení).
+export async function checkForUpdate(options: { force?: boolean } = {}): Promise<AppUpdate | null> {
   if (Platform.OS === "web") return null;
+  if (!options.force) {
+    const cached = await readCheckCache();
+    if (cached && Date.now() - cached.at < MIN_CHECK_INTERVAL_MS) return cached.update;
+  }
+  const found = await fetchLatestUpdate();
+  await writeCheckCache({ at: Date.now(), update: found });
+  return found;
+}
+
+type CheckCache = { at: number; update: AppUpdate | null };
+
+async function readCheckCache(): Promise<CheckCache | null> {
+  try {
+    const raw = await AsyncStorage.getItem(CHECK_CACHE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as CheckCache;
+    if (typeof parsed?.at !== "number") return null;
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+async function writeCheckCache(value: CheckCache): Promise<void> {
+  try {
+    await AsyncStorage.setItem(CHECK_CACHE_KEY, JSON.stringify(value));
+  } catch {
+    // Cache je optimalizace; její selhání nesmí rozbít kontrolu aktualizace.
+  }
+}
+
+async function fetchLatestUpdate(): Promise<AppUpdate | null> {
   const response = await fetch(RELEASES_API, { headers: { Accept: "application/vnd.github+json" } });
   if (!response.ok) throw new Error(`GitHub odpověděl ${response.status}`);
   const releases = (await response.json()) as GithubRelease[];
