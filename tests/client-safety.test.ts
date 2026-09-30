@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
 import { assistantConversationTitle, upsertAssistantConversation, type AssistantConversation, type AssistantHistoryMessage } from "../lib/assistant-history";
@@ -64,5 +65,36 @@ describe("klientská bezpečnost a deterministicita", () => {
     const result = upsertAssistantConversation([existing], null, [], 2);
     expect(result.id).toBeNull();
     expect(result.conversations).toEqual([existing]);
+  });
+});
+
+/**
+ * Regrese z 30. 9.: při sloučení songcraft-studio do temney-agent se přepsal
+ * app/(tabs)/_layout.tsx a přišlo s ním `href: null`, které tab Alba schovalo.
+ * Uživatel ztratil celou sekci i možnost založit album, přitom v Repu se
+ * nemažlo nic — soubor albums.tsx byl bitově stejný.
+ */
+describe("taby nejsou schované", () => {
+  const layout = readFileSync("app/(tabs)/_layout.tsx", "utf8");
+
+  it("žádný tab není skrytý přes href: null", () => {
+    expect(layout).not.toContain("href: null");
+  });
+
+  it("všechny taby jsou registrované", () => {
+    for (const name of ["index", "texts", "albums", "library", "assistant", "settings"]) {
+      expect(layout, `chybí tab ${name}`).toContain(`name="${name}"`);
+    }
+  });
+
+  it("názvy tabů odpovídají těm, co uživatel měl ve 3.0.1", () => {
+    expect(layout).toContain('title: "Alba"');
+    expect(layout).toContain('title: "Temney Agent"');
+    expect(layout).not.toContain('title: "Asistent"');
+  });
+
+  it("album jde pořád vytvořit", () => {
+    expect(readFileSync("app/(tabs)/albums.tsx", "utf8")).toContain("album/new");
+    expect(readFileSync("app/album/new.tsx", "utf8")).toContain("create.mutateAsync");
   });
 });
