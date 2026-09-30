@@ -5,7 +5,7 @@ import { isAllowedPrivateUser, privateAccessMessage } from "../_shared/access.ts
 const cors = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
-  "Access-Control-Allow-Methods": "GET, OPTIONS",
+  "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
   "Content-Type": "application/json",
 };
 const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: cors });
@@ -23,7 +23,12 @@ const json = (body: unknown, status = 200) => new Response(JSON.stringify(body),
  */
 Deno.serve(async (request) => {
   if (request.method === "OPTIONS") return new Response("ok", { headers: cors });
-  if (request.method !== "GET") return json({ error: "Použij GET." }, 405);
+  // supabase.functions.invoke() posílá POST, i když funkce nic nepřijímá.
+  // Když se povolí jen GET, klient dostane 405 „Použijte GET“ a appka to
+  // vyloží jako „nepodařilo se ověřit“. Proto bereme obojí.
+  if (request.method !== "GET" && request.method !== "POST") {
+    return json({ error: `Nepovolená metoda ${request.method}, použij GET.` }, 405);
+  }
   const authorization = request.headers.get("Authorization");
   const url = Deno.env.get("SUPABASE_URL") || Deno.env.get("SONGCRAFT_SUPABASE_URL");
   const anonKey = Deno.env.get("SUPABASE_ANON_KEY") || Deno.env.get("SONGCRAFT_SUPABASE_ANON_KEY");

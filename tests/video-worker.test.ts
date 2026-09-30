@@ -103,6 +103,13 @@ describe("Oracle video worker contract", () => {
     expect(client.slice(0, client.indexOf("export"))).not.toContain("refresh_token");
   });
 
+  it("bere GET i POST, protoze klient posila POST", () => {
+    const fn = readFileSync("supabase/functions/youtube-status/index.ts", "utf8");
+    expect(fn).toContain('request.method !== "GET" && request.method !== "POST"');
+    expect(fn).not.toContain('if (request.method !== "GET") return json({ error: "Použij GET." }');
+    expect(readFileSync("lib/external-studio.ts", "utf8")).toContain('invoke("youtube-status", { method: "GET" })');
+  });
+
   it("only knows render types the DB constraint allows", () => {
     const known = ['"static_cover"', '"image_animation"', '"full_scenes"', '"video_loop"'];
     for (const type of known) expect(worker).toContain(`type === ${type}`);

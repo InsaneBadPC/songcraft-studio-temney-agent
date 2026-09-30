@@ -185,7 +185,7 @@ export type YoutubeChannelStatus = {
  * tabulka youtube_credentials má záměrně žádnou policy pro klienta.
  */
 export async function getYoutubeChannelStatus(): Promise<YoutubeChannelStatus> {
-  const { data, error } = await supabase.functions.invoke("youtube-status");
+  const { data, error } = await supabase.functions.invoke("youtube-status", { method: "GET" });
   if (error) {
     // `error.message` je u Supabase klienta vždycky jen "Edge Function returned
     // a non-2xx status code", což nepomáhá. Skutečný stav a tělo odpovědi jsou
