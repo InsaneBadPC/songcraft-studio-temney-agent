@@ -110,6 +110,16 @@ describe("agent and publication boundaries", () => {
     expect(ops).toContain("AbortError");
   });
 
+  it("nasazuje youtube-status, jinak aplikace spadne na staré tlačítko", () => {
+    // Seznam funkcí je ruční. Když nová funkce není v workflow, zůstane
+    // nenasazená, appka ji nemůže volat a vrátí se k nefungujícímu tlačítku,
+    // které hází redirect_uri_mismatch.
+    const wf = readFileSync(".github/workflows/deploy-agent-orchestrator.yml", "utf8");
+    const deployed = [...wf.matchAll(/functions deploy --use-api ([a-z0-9-]+)/g)].map((m) => m[1]);
+    expect(deployed).toContain("youtube-status");
+    expect(new Set(deployed).size, "duplicitní nasazování").toBe(deployed.length);
+  });
+
   it("keeps the system prompt template literal closed", () => {
     // Past na tuhle chybu: při patchi promptu se jednou přepsal řádek, který
     // template literal uzavíral, a orchestrator měl syntaktickou chybu, kterou

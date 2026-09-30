@@ -119,6 +119,7 @@ jobs:
           supabase functions deploy --use-api youtube-sync-stats --project-ref "$SUPABASE_PROJECT_ID" --no-verify-jwt
           supabase functions deploy --use-api youtube-publish-scheduler --project-ref "$SUPABASE_PROJECT_ID" --no-verify-jwt
           supabase functions deploy --use-api youtube-oauth-start --project-ref "$SUPABASE_PROJECT_ID"
+          supabase functions deploy --use-api youtube-status --project-ref "$SUPABASE_PROJECT_ID"
           supabase functions deploy --use-api youtube-oauth-callback --project-ref "$SUPABASE_PROJECT_ID" --no-verify-jwt
           supabase functions deploy --use-api songcraft-youtube --project-ref "$SUPABASE_PROJECT_ID"
           supabase functions deploy --use-api video-renderer-dispatch --project-ref "$SUPABASE_PROJECT_ID"

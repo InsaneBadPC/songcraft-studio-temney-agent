@@ -172,6 +172,8 @@ export async function uploadToExternalStorage(input: { folder: "covers" | "audio
 
 export type YoutubeChannelStatus = {
   connected: boolean;
+  /** Server neodpověděl nebo vrátil chybu. Není to totéž jako „nepřipojeno". */
+  checkFailed?: boolean;
   channelId?: string;
   channelTitle?: string;
   connectedAt?: string;
@@ -184,7 +186,12 @@ export type YoutubeChannelStatus = {
  */
 export async function getYoutubeChannelStatus(): Promise<YoutubeChannelStatus> {
   const { data, error } = await supabase.functions.invoke("youtube-status");
-  if (error) return { connected: false, message: "Stav kanálu se nepodařilo načíst." };
+  if (error) {
+    // Ticho by to vypadalo jako „kanál není připojený" a ukázalo staré
+    // tlačítko, které pak hodí redirect_uri_mismatch. Vracíme rozlišený stav,
+    // aby UI ukázalo skutečnou příčinu.
+    return { connected: false, checkFailed: true, message: error.message || "Stav kanálu se nepodařilo načíst." };
+  }
   const value = (data ?? {}) as Partial<YoutubeChannelStatus>;
   return {
     connected: value.connected === true,
