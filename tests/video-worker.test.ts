@@ -84,6 +84,19 @@ describe("Oracle video worker contract", () => {
     expect(cleanup).toContain("rm(path.join(workDir, file)");
   });
 
+  it("nezavádí funkci, která by vracela tokeny", () => {
+    const fn = readFileSync("supabase/functions/youtube-status/index.ts", "utf8");
+    const api = readFileSync("lib/external-studio.ts", "utf8");
+    // youtube_credentials má záměrně žádnou policy pro klienta; funkce smí
+    // číst jen se service role a vrátit smí příznak a titul
+    expect(fn).toContain("SUPABASE_SERVICE_ROLE_KEY");
+    expect(fn).not.toContain("refresh_token");
+    expect(fn).toContain("channel_id,updated_at");
+    expect(api).toContain("getYoutubeChannelStatus");
+    const client = api.slice(api.indexOf("export async function getYoutubeChannelStatus"));
+    expect(client.slice(0, client.indexOf("export"))).not.toContain("refresh_token");
+  });
+
   it("only knows render types the DB constraint allows", () => {
     const known = ['"static_cover"', '"image_animation"', '"full_scenes"', '"video_loop"'];
     for (const type of known) expect(worker).toContain(`type === ${type}`);

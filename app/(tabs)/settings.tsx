@@ -1,12 +1,13 @@
 import MaterialIcons from "@expo/vector-icons/MaterialIcons";
 import * as WebBrowser from "expo-web-browser";
 import { ActivityIndicator, Alert, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import { EmptyState, LoadingState, SectionTitle, StudioHeader } from "@/components/studio-ui";
 import { ScreenContainer } from "@/components/screen-container";
 import { startPrivateLogin } from "@/constants/oauth";
 import { useAuth } from "@/hooks/use-auth";
+import { getYoutubeChannelStatus, type YoutubeChannelStatus } from "@/lib/external-studio";
 import { useColors } from "@/hooks/use-colors";
 import { checkForUpdate, installUpdate, CURRENT_VERSION, type AppUpdate } from "@/lib/app-update";
 import { downloadOrShareFile } from "@/lib/download-and-share";
@@ -25,6 +26,7 @@ export default function SettingsScreen() {
   const [installing, setInstalling] = useState(false);
   const [updateProgress, setUpdateProgress] = useState(0);
   const [connectingYoutube, setConnectingYoutube] = useState(false);
+  const [youtubeState, setYoutubeState] = useState<YoutubeChannelStatus | null>(null);
 
   const runUpdateCheck = async () => {
     setChecking(true);
@@ -51,6 +53,13 @@ export default function SettingsScreen() {
       setUpdateProgress(0);
     }
   };
+
+  useEffect(() => {
+    if (!isAuthenticated) return;
+    let cancelled = false;
+    void getYoutubeChannelStatus().then((state) => { if (!cancelled) setYoutubeState(state); }).catch(() => {});
+    return () => { cancelled = true; };
+  }, [isAuthenticated]);
 
   const connectYoutube = async () => {
     setConnectingYoutube(true);
@@ -90,7 +99,7 @@ export default function SettingsScreen() {
     <View style={[styles.profile, { backgroundColor: colors.surface, borderColor: colors.border }]}><View style={[styles.avatar, { backgroundColor: `${colors.primary}26` }]}><Text style={[styles.avatarText, { color: colors.primary }]}>{(user?.name ?? "S").slice(0, 1).toUpperCase()}</Text></View><View style={styles.profileCopy}><Text style={[styles.profileName, { color: colors.foreground }]}>{user?.name ?? "SongCraft autor"}</Text><Text numberOfLines={1} style={[styles.profileMail, { color: colors.muted }]}>{user?.email ?? "Soukromý cloudový účet"}</Text></View><MaterialIcons name="verified-user" size={22} color={colors.success} /></View>
     <SectionTitle title="Synchronizace" /><View style={[styles.syncCard, { backgroundColor: `${colors.success}15`, borderColor: `${colors.success}55` }]}><MaterialIcons name="cloud-done" size={25} color={colors.success} /><View style={styles.syncCopy}><Text style={[styles.syncTitle, { color: colors.foreground }]}>Cloudové studio je propojeno</Text><Text style={[styles.syncText, { color: colors.muted }]}>Obsah se načítá z tvého zabezpečeného prostoru. Soubory zůstávají oddělené od katalogu.</Text></View></View>
     <View style={styles.statRow}><Stat value={albums.length} label="alb" /><Stat value={snapshot.data?.documents.length ?? 0} label="textů" /><Stat value={versions} label="MP3 verzí" /></View>
-    <SectionTitle title="YouTube kanál" /><Pressable onPress={() => void connectYoutube()} disabled={connectingYoutube} style={({ pressed }) => [styles.youtubeConnect, { backgroundColor: `${colors.error}12`, borderColor: `${colors.error}45`, opacity: connectingYoutube || pressed ? 0.65 : 1 }]}><View style={[styles.youtubeIcon, { backgroundColor: `${colors.error}1C` }]}><MaterialIcons name="smart-display" size={21} color={colors.error} /></View><View style={styles.youtubeCopy}><Text style={[styles.youtubeTitle, { color: colors.foreground }]}>Připojit YouTube OAuth</Text><Text style={[styles.youtubeText, { color: colors.muted }]}>Bezpečné PKCE přihlášení. Tokeny zůstávají na serveru a publikace vyžaduje potvrzení.</Text></View>{connectingYoutube ? <ActivityIndicator size="small" color={colors.error} /> : <MaterialIcons name="chevron-right" size={20} color={colors.muted} />}</Pressable>
+    <SectionTitle title="YouTube kanál" />{youtubeState?.connected ? <View style={[styles.youtubeConnect, { backgroundColor: `${colors.success}12`, borderColor: `${colors.success}45` }]}><View style={[styles.youtubeIcon, { backgroundColor: `${colors.success}1C` }]}><MaterialIcons name="check-circle" size={21} color={colors.success} /></View><View style={styles.youtubeCopy}><Text style={[styles.youtubeTitle, { color: colors.foreground }]}>{youtubeState.channelTitle ?? "YouTube kanál"}</Text><Text style={[styles.youtubeText, { color: colors.muted }]}>Připojeno. Nahrávání i publikace fungují, tokeny jsou na serveru.</Text></View></View> : <Pressable onPress={() => void connectYoutube()} disabled={connectingYoutube} style={({ pressed }) => [styles.youtubeConnect, { backgroundColor: `${colors.error}12`, borderColor: `${colors.error}45`, opacity: connectingYoutube || pressed ? 0.65 : 1 }]}><View style={[styles.youtubeIcon, { backgroundColor: `${colors.error}1C` }]}><MaterialIcons name="smart-display" size={21} color={colors.error} /></View><View style={styles.youtubeCopy}><Text style={[styles.youtubeTitle, { color: colors.foreground }]}>Připojit YouTube OAuth</Text><Text style={[styles.youtubeText, { color: colors.muted }]}>Když Google přesměruje jinam, musí být u klíče 77741409309 v Google Cloud zapsaná tato adresa: {YOUTUBE_REDIRECT}</Text></View>{connectingYoutube ? <ActivityIndicator size="small" color={colors.error} /> : <MaterialIcons name="chevron-right" size={20} color={colors.muted} />}</Pressable>}
     <SectionTitle title="Kompletní záloha" /><Pressable onPress={() => void exportLibrary()} style={({ pressed }) => [styles.libraryExport, { backgroundColor: colors.primary, opacity: exporting || pressed ? 0.68 : 1 }]} disabled={exporting}><MaterialIcons name="archive" size={21} color="#141317" /><View style={styles.libraryExportCopy}><Text style={styles.libraryExportTitle}>{exporting ? "Vytvářím archiv…" : "Exportovat celou knihovnu"}</Text><Text style={styles.libraryExportText}>Texty, prompty, alba, obrázky, MP3 i metadata v jednom ZIP souboru.</Text></View></Pressable>
     {exportStatus ? <View style={[styles.exportProgress, { backgroundColor: `${colors.primary}16`, borderColor: `${colors.primary}4A` }]}><ActivityIndicator size="small" color={colors.primary} /><Text style={[styles.exportProgressText, { color: colors.foreground }]}>{exportStatus}</Text></View> : null}
     <SectionTitle title="Zálohy jednotlivých alb" />{albums.length ? albums.map((album) => <Pressable key={album.id} disabled={exporting} onPress={() => void exportLibrary(album)} style={({ pressed }) => [styles.albumExport, { backgroundColor: colors.surface, borderColor: colors.border, opacity: exporting || pressed ? 0.65 : 1 }]}><View style={[styles.albumExportIcon, { backgroundColor: `${colors.primary}1C` }]}><MaterialIcons name="folder-zip" size={21} color={colors.primary} /></View><View style={styles.albumExportCopy}><Text numberOfLines={1} style={[styles.albumExportTitle, { color: colors.foreground }]}>{album.name}</Text><Text style={[styles.albumExportText, { color: colors.muted }]}>Exportovat toto album samostatně</Text></View><MaterialIcons name="download" size={20} color={colors.primary} /></Pressable>) : <Text style={[styles.emptyAlbumNote, { color: colors.muted }]}>Založ album, aby šlo stáhnout samostatnou zálohu.</Text>}
@@ -99,6 +108,8 @@ export default function SettingsScreen() {
     <Pressable onPress={showLogout} style={({ pressed }) => [styles.logout, { borderColor: colors.border, opacity: pressed ? 0.65 : 1 }]}><MaterialIcons name="logout" size={20} color={colors.error} /><Text style={[styles.logoutText, { color: colors.error }]}>Odhlásit se</Text></Pressable>
   </ScrollView></ScreenContainer>;
 }
+
+const YOUTUBE_REDIRECT = "https://hfykngbhcxmnpxvjagoj.supabase.co/functions/v1/youtube-oauth-callback";
 
 function Stat({ value, label }: { value: number; label: string }) { const colors = useColors(); return <View style={[styles.stat, { backgroundColor: colors.surface, borderColor: colors.border }]}><Text style={[styles.statValue, { color: colors.foreground }]}>{value}</Text><Text style={[styles.statLabel, { color: colors.muted }]}>{label}</Text></View>; }
 function Info({ icon, title, text }: { icon: React.ComponentProps<typeof MaterialIcons>["name"]; title: string; text: string }) { const colors = useColors(); return <View style={styles.info}><View style={[styles.infoIcon, { backgroundColor: `${colors.primary}1C` }]}><MaterialIcons name={icon} size={20} color={colors.primary} /></View><View style={styles.infoCopy}><Text style={[styles.infoTitle, { color: colors.foreground }]}>{title}</Text><Text style={[styles.infoText, { color: colors.muted }]}>{text}</Text></View></View>; }

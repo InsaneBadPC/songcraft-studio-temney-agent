@@ -170,6 +170,31 @@ export async function uploadToExternalStorage(input: { folder: "covers" | "audio
   return { key: path, url: (await signedUrl(path, user.id)) || "", byteSize: bytes.byteLength, originalFileName: validated.fileName, mimeType: validated.mimeType };
 }
 
+export type YoutubeChannelStatus = {
+  connected: boolean;
+  channelId?: string;
+  channelTitle?: string;
+  connectedAt?: string;
+  message?: string;
+};
+
+/**
+ * Je kanál připojený? Server vrací jen příznak a titul, nikdy tokeny —
+ * tabulka youtube_credentials má záměrně žádnou policy pro klienta.
+ */
+export async function getYoutubeChannelStatus(): Promise<YoutubeChannelStatus> {
+  const { data, error } = await supabase.functions.invoke("youtube-status");
+  if (error) return { connected: false, message: "Stav kanálu se nepodařilo načíst." };
+  const value = (data ?? {}) as Partial<YoutubeChannelStatus>;
+  return {
+    connected: value.connected === true,
+    channelId: value.channelId,
+    channelTitle: value.channelTitle,
+    connectedAt: value.connectedAt,
+    message: value.message,
+  };
+}
+
 export async function createExternalAlbum(input: { name: string; description?: string | null; releaseYear?: number | null; coverStorageKey?: string | null }) {
   const user = await owner();
   const { data, error } = await supabase.from("sc_albums").insert({ user_id: user.id, name: input.name, description: input.description ?? null, release_year: input.releaseYear ?? null, cover_path: ownedOptionalPath(user.id, input.coverStorageKey) }).select("id").single();
