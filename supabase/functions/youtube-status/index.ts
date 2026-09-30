@@ -51,18 +51,48 @@ Deno.serve(async (request) => {
     });
   }
 
-  // Titul kanálu si vezmeme z API, uložený je jen číselný ID. Když to selže,
-  // vrátíme alespoň ID, aby UI nemuselo mlčet.
+  // Titul kanálu si vezmeme z API, uložený je jen číselný ID. Access token po
+  // hodině vyprchá, takže nejdřív zkusíme obnovit ho z refresh tokenu. Bez toho
+  // by UI ukázalo „YouTube kanál" místo skutečného názvu, i když je vše v pořádku.
   let channelTitle = "YouTube kanál";
   try {
     const { data: credential } = await admin
       .from("youtube_credentials")
-      .select("access_token")
+      .select("access_token,refresh_token,expires_at")
       .eq("user_id", user.id)
       .maybeSingle();
-    if (credential?.access_token) {
+    let access = credential?.access_token;
+    const expired = !credential?.expires_at || new Date(credential.expires_at).getTime() < Date.now() + 60_000;
+    if (expired && credential?.refresh_token) {
+      const clientId = Deno.env.get("YOUTUBE_CLIENT_ID");
+      const clientSecret = Deno.env.get("YOUTUBE_CLIENT_SECRET");
+      if (clientId && clientSecret) {
+        const refreshed = await fetch("https://oauth2.googleapis.com/token", {
+          method: "POST",
+          headers: { "Content-Type": "application/x-www-form-urlencoded" },
+          body: new URLSearchParams({
+            client_id: clientId,
+            client_secret: clientSecret,
+            refresh_token: credential.refresh_token,
+            grant_type: "refresh_token",
+          }),
+        });
+        if (refreshed.ok) {
+          const payload = await refreshed.json();
+          access = payload.access_token;
+          await admin
+            .from("youtube_credentials")
+            .update({
+              access_token: payload.access_token,
+              expires_at: new Date(Date.now() + Number(payload.expires_in ?? 3600) * 1000).toISOString(),
+            })
+            .eq("user_id", user.id);
+        }
+      }
+    }
+    if (access) {
       const response = await fetch("https://www.googleapis.com/youtube/v3/channels?part=snippet&mine=true", {
-        headers: { Authorization: `Bearer ${credential.access_token}` },
+        headers: { Authorization: `Bearer ${access}` },
       });
       if (response.ok) {
         const payload = await response.json();

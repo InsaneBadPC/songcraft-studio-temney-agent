@@ -187,10 +187,28 @@ export type YoutubeChannelStatus = {
 export async function getYoutubeChannelStatus(): Promise<YoutubeChannelStatus> {
   const { data, error } = await supabase.functions.invoke("youtube-status");
   if (error) {
-    // Ticho by to vypadalo jako „kanál není připojený" a ukázalo staré
-    // tlačítko, které pak hodí redirect_uri_mismatch. Vracíme rozlišený stav,
-    // aby UI ukázalo skutečnou příčinu.
-    return { connected: false, checkFailed: true, message: error.message || "Stav kanálu se nepodařilo načíst." };
+    // `error.message` je u Supabase klienta vždycky jen "Edge Function returned
+    // a non-2xx status code", což nepomáhá. Skutečný stav a tělo odpovědi jsou
+    // v `error.context` a dají se přečíst jen jednou, proto je tu čtu.
+    let detail = "";
+    let status: number | null = null;
+    const context = (error as { context?: unknown }).context;
+    try {
+      if (context instanceof Response) {
+        status = context.status;
+        const text = await context.text();
+        try {
+          const parsed = JSON.parse(text) as { error?: unknown };
+          detail = typeof parsed.error === "string" ? parsed.error : text;
+        } catch {
+          detail = text;
+        }
+      }
+    } catch {
+      detail = "";
+    }
+    const message = `${status ? `HTTP ${status} — ` : ""}${detail || error.message || "neznámá chyba"}`;
+    return { connected: false, checkFailed: true, message: message.slice(0, 400) };
   }
   const value = (data ?? {}) as Partial<YoutubeChannelStatus>;
   return {

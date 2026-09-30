@@ -90,7 +90,13 @@ describe("Oracle video worker contract", () => {
     // youtube_credentials má záměrně žádnou policy pro klienta; funkce smí
     // číst jen se service role a vrátit smí příznak a titul
     expect(fn).toContain("SUPABASE_SERVICE_ROLE_KEY");
-    expect(fn).not.toContain("refresh_token");
+    // refresh token se smí použít na serveru, nesmí se nikdy vrátit v odpovědi
+    const bodies = [...fn.matchAll(/json\(\s*\{([\s\S]*?)\}/g)].map((m) => m[1]);
+    expect(bodies.length, "funkce nic nevrací").toBeGreaterThan(0);
+    for (const body of bodies) {
+      expect(body, `odpověď vrací refresh_token: ${body.slice(0, 80)}`).not.toContain("refresh_token");
+      expect(body, `odpověď vrací access_token: ${body.slice(0, 80)}`).not.toContain("access_token");
+    }
     expect(fn).toContain("channel_id,updated_at");
     expect(api).toContain("getYoutubeChannelStatus");
     const client = api.slice(api.indexOf("export async function getYoutubeChannelStatus"));
