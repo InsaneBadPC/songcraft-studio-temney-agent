@@ -6,6 +6,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { useColors } from "@/hooks/use-colors";
 import { checkForUpdate, getSkippedVersion, installUpdate, skipVersion, type AppUpdate } from "@/lib/app-update";
+import { OnPrimary, Radius, Type } from "@/lib/design-tokens";
 
 /**
  * Nenápadný pruh v horní části aplikace, který se objeví jen když je na GitHubu novější APK.
@@ -89,7 +90,7 @@ export function UpdateBanner() {
                 onPress={() => void start()}
                 style={({ pressed }) => [styles.primary, { backgroundColor: colors.primary, transform: [{ scale: pressed ? 0.97 : 1 }], opacity: pressed ? 0.9 : 1 }]}
               >
-                <MaterialIcons name="download" size={18} color="#141317" />
+                <MaterialIcons name="download" size={18} color={OnPrimary} />
                 <Text style={styles.primaryText}>Aktualizovat</Text>
               </Pressable>
             ) : null}
@@ -115,24 +116,24 @@ const styles = StyleSheet.create({
     left: 12,
     right: 12,
     borderWidth: 1,
-    borderRadius: 20,
+    borderRadius: Radius.lg,
     padding: 14,
     gap: 12,
-    shadowColor: "#7C3AED",
+    shadowColor: "#000000",
     shadowOpacity: 0.28,
     shadowRadius: 20,
     shadowOffset: { width: 0, height: 10 },
   },
   row: { flexDirection: "row", alignItems: "center", gap: 11 },
-  badge: { width: 42, height: 42, borderRadius: 13, alignItems: "center", justifyContent: "center" },
+  badge: { width: 42, height: 42, borderRadius: Radius.sm, alignItems: "center", justifyContent: "center" },
   copy: { flex: 1, gap: 3 },
   title: { fontSize: 15, fontWeight: "800", letterSpacing: 0.2 },
-  text: { fontSize: 12, lineHeight: 17 },
+  text: { ...Type.caption, lineHeight: 17 },
   track: { height: 8, borderRadius: 4, overflow: "hidden" },
   fill: { height: "100%", borderRadius: 4 },
   actions: { flexDirection: "row", gap: 9 },
-  primary: { flex: 1, minHeight: 46, borderRadius: 14, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8 },
-  primaryText: { color: "#141317", fontSize: 14, fontWeight: "900" },
-  ghost: { minHeight: 46, paddingHorizontal: 18, borderRadius: 14, borderWidth: 1, alignItems: "center", justifyContent: "center" },
-  ghostText: { fontSize: 14, fontWeight: "800" },
+  primary: { flex: 1, minHeight: 46, borderRadius: Radius.sm, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8 },
+  primaryText: { color: OnPrimary, fontSize: Type.label.fontSize, lineHeight: Type.label.lineHeight, fontWeight: "900" },
+  ghost: { minHeight: 46, paddingHorizontal: 18, borderRadius: Radius.sm, borderWidth: 1, alignItems: "center", justifyContent: "center" },
+  ghostText: { fontSize: Type.label.fontSize, lineHeight: Type.label.lineHeight, fontWeight: "800" },
 });

@@ -7,7 +7,7 @@ import { FlatList, Pressable, RefreshControl, ScrollView, StyleSheet, Text, Text
 import Animated, { FadeInDown, Layout } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
-import { CoverArt, EmptyState, IconButton, Shimmer, StudioHeader, StatusChip, formatDate } from "@/components/studio-ui";
+import { CoverArt, EmptyState, FilterChip, IconButton, Shimmer, StatusChip, StudioHeader, formatDate } from "@/components/studio-ui";
 import { ScreenContainer } from "@/components/screen-container";
 import { startPrivateLogin } from "@/constants/oauth";
 import { useAuth } from "@/hooks/use-auth";
@@ -15,13 +15,14 @@ import { useColors } from "@/hooks/use-colors";
 import { trpc } from "@/lib/trpc";
 import { firstQueryParam } from "@/lib/query-params";
 import { TextImporter } from "@/components/text-importer";
+import { Radius, Type } from "@/lib/design-tokens";
 
 type Phase = "draft" | "album" | "mp3" | "published";
 const phaseMeta = (phase: Phase, colors: any) => {
   switch (phase) {
     case "published": return { label: "Publikováno", icon: "public" as const, color: colors.success, bg: "rgba(16,185,129,0.14)", border: colors.success };
     case "mp3": return { label: "S MP3", icon: "music-note" as const, color: colors.success, bg: "rgba(16,185,129,0.10)", border: colors.success };
-    case "album": return { label: "V albu", icon: "album" as const, color: colors.primary, bg: "rgba(59,130,246,0.12)", border: colors.primary };
+    case "album": return { label: "V albu", icon: "album" as const, color: colors.primary, bg: "rgba(0,217,236,0.12)", border: colors.primary };
     default: return { label: "Rozpracováno", icon: "edit-note" as const, color: colors.muted, bg: "rgba(148,163,184,0.10)", border: colors.muted };
   }
 };
@@ -63,12 +64,12 @@ export default function TextsScreen() {
   }), [albumId, search, statusFilter, phaseFilter, allDocuments, snapshot.data?.songs, snapshot.data?.versions]);
 
   if (loading || (isAuthenticated && snapshot.isLoading)) {
-    return <ScreenContainer className="px-5"><View style={{ paddingTop: 14, gap: 12 }}><Shimmer height={36} radius={16} /><Shimmer height={48} radius={16} /><View style={{ gap: 10, marginTop: 12 }}>{[1,2,3].map(i=> <View key={i} style={[styles.row, { backgroundColor: colors.surface, borderColor: colors.border }]}><Shimmer width={60} height={60} radius={16} /><View style={{ flex:1, gap:8 }}><Shimmer height={14} width="60%" /><Shimmer height={12} width="80%" /></View></View>)}</View></View></ScreenContainer>;
+    return <ScreenContainer inset><View style={{ paddingTop: 14, gap: 12 }}><Shimmer height={36} radius={16} /><Shimmer height={48} radius={16} /><View style={{ gap: 10, marginTop: 12 }}>{[1,2,3].map(i=> <View key={i} style={[styles.row, { backgroundColor: colors.surface, borderColor: colors.border }]}><Shimmer width={60} height={60} radius={16} /><View style={{ flex:1, gap:8 }}><Shimmer height={14} width="60%" /><Shimmer height={12} width="80%" /></View></View>)}</View></View></ScreenContainer>;
   }
-  if (!isAuthenticated) return <ScreenContainer className="p-5 justify-center"><EmptyState icon="lock" title="Přihlášení je potřeba" text="Texty se ukládají do soukromého cloudového prostoru." action={<Pressable onPress={() => void startPrivateLogin()} style={[styles.login, { backgroundColor: colors.primary }]}><Text style={styles.loginText}>Přihlásit se</Text></Pressable>} /></ScreenContainer>;
+  if (!isAuthenticated) return <ScreenContainer centered><EmptyState icon="lock" title="Přihlášení je potřeba" text="Texty se ukládají do soukromého cloudového prostoru." action={<Pressable onPress={() => void startPrivateLogin()} style={[styles.login, { backgroundColor: colors.primary }]}><Text style={styles.loginText}>Přihlásit se</Text></Pressable>} /></ScreenContainer>;
 
   return (
-    <ScreenContainer className="px-5">
+    <ScreenContainer inset>
       <Animated.FlatList
         data={records}
         keyExtractor={(item) => String(item.id)}
@@ -76,7 +77,7 @@ export default function TextsScreen() {
         contentContainerStyle={[styles.content, { paddingBottom: insets.bottom + 96 }]}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.primary} colors={[colors.primary]} progressBackgroundColor={colors.surface} />}
         ListHeaderComponent={<>
-          <StudioHeader eyebrow="Kreativní dílna" title="Texty" action={<View style={styles.headerActions}><TextImporter /><Pressable onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(()=>{}); router.push("/text/new" as never); }} style={({ pressed }) => [{ transform: [{ scale: pressed ? 0.97 : 1 }] }]}><LinearGradient colors={["#3B82F6", "#6366F1"]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={styles.fabGradient}><MaterialIcons name="add" size={22} color="#FFFFFF" /></LinearGradient></Pressable></View>} />
+          <StudioHeader eyebrow="Kreativní dílna" title="Texty" action={<View style={styles.headerActions}><TextImporter /><Pressable onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(()=>{}); router.push("/text/new" as never); }} style={({ pressed }) => [{ transform: [{ scale: pressed ? 0.97 : 1 }] }]}><LinearGradient colors={[colors.primary, colors.primaryVibrant]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={styles.fabGradient}><MaterialIcons name="add" size={22} color="#FFFFFF" /></LinearGradient></Pressable></View>} />
           <View style={[styles.search, { backgroundColor: colors.surface, borderColor: "rgba(255,255,255,0.08)", shadowColor: "#000", shadowOpacity: 0.12, shadowRadius: 12, shadowOffset: { width: 0, height: 4 }, elevation: 4 }]}>
             <MaterialIcons name="search" size={20} color={colors.muted} />
             <TextInput value={search} onChangeText={setSearch} placeholder="Hledat v názvech, textech a promptech" placeholderTextColor={colors.muted} style={[styles.searchInput, { color: colors.foreground }]} />
@@ -142,7 +143,7 @@ export default function TextsScreen() {
       />
       <View style={[styles.bottomBar, { paddingBottom: insets.bottom+12, backgroundColor: colors.background, borderTopColor: "rgba(255,255,255,0.06)" }]}>
         <Pressable onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(()=>{}); router.push("/text/new" as never); }} style={({ pressed }) => [styles.bottomCta, { transform:[{scale: pressed?0.97:1}] }]}>
-          <LinearGradient colors={["#3B82F6","#6366F1","#8B5CF6"]} start={{x:0,y:0}} end={{x:1,y:0}} style={StyleSheet.absoluteFill as any} />
+          <LinearGradient colors={[colors.primary, colors.primaryVibrant]} start={{x:0,y:0}} end={{x:1,y:0}} style={StyleSheet.absoluteFill as any} />
           <MaterialIcons name="edit" size={19} color="#FFFFFF" />
           <Text style={styles.bottomCtaText}>Nový text</Text>
         </Pressable>
@@ -151,46 +152,42 @@ export default function TextsScreen() {
   );
 }
 
-function FilterChip({ active, label, dotColor, onPress }: { active: boolean; label: string; dotColor?: string; onPress: () => void }) {
-  const colors = useColors();
-  return <Pressable onPress={onPress} style={({ pressed }) => [styles.filter, { backgroundColor: active ? colors.primary : colors.surface, borderColor: active ? colors.primary : "rgba(255,255,255,0.08)", opacity: pressed?0.85:1, transform:[{scale: pressed?0.97:1}] }]}>{dotColor ? <View style={[styles.dot, { backgroundColor: dotColor }]} /> : null}<Text numberOfLines={1} style={[styles.filterText, { color: active ? "#FFFFFF" : colors.foreground }]}>{label}</Text></Pressable>;
-}
 function StatusFilterChip({ active, label, onPress, colors }: { active: boolean; label: string; onPress: () => void; colors: ReturnType<typeof useColors> }) {
   return <Pressable onPress={onPress} style={({ pressed }) => [styles.statusChip, { backgroundColor: active ? colors.primary : colors.surface, borderColor: active ? colors.primary : "rgba(255,255,255,0.08)", opacity: pressed?0.85:1, transform:[{scale: pressed?0.97:1}] }]}><Text style={[styles.statusChipText, { color: active ? "#FFFFFF" : colors.foreground }]}>{label}</Text></Pressable>;
 }
 const styles = StyleSheet.create({
   content: { paddingTop: 14 },
   headerActions: { flexDirection: "row", gap: 8, alignItems: "center" },
-  fabGradient: { width: 44, height: 44, borderRadius: 14, alignItems: "center", justifyContent: "center" },
-  search: { height: 48, borderRadius: 16, borderWidth: 1, paddingHorizontal: 14, flexDirection: "row", alignItems: "center", gap: 10, marginTop: 4 },
+  fabGradient: { width: 44, height: 44, borderRadius: Radius.sm, alignItems: "center", justifyContent: "center" },
+  search: { height: 48, borderRadius: Radius.md, borderWidth: 1, paddingHorizontal: 14, flexDirection: "row", alignItems: "center", gap: 10, marginTop: 4 },
   searchInput: { flex: 1, fontSize: 15, paddingVertical: 0, fontWeight: "500" },
-  searchClear: { width: 32, height: 32, borderRadius: 16, alignItems: "center", justifyContent: "center", backgroundColor: "rgba(255,255,255,0.06)" },
+  searchClear: { width: 32, height: 32, borderRadius: Radius.md, alignItems: "center", justifyContent: "center", backgroundColor: "rgba(255,255,255,0.06)" },
   filterGroup: { marginTop: 16, gap: 8 },
-  filterLabel: { fontSize: 10, fontWeight: "700", letterSpacing: 1, marginLeft: 2 },
+  filterLabel: { ...Type.overline, letterSpacing: 1, marginLeft: 2 },
   filters: { paddingRight: 20, gap: 8, paddingVertical: 2 },
-  filter: { height: 44, paddingHorizontal: 14, justifyContent: "center", borderWidth: 1, borderRadius: 18, minWidth: 44, flexDirection: "row", alignItems: "center", gap: 6 },
-  filterText: { fontSize: 13, fontWeight: "600", letterSpacing: -0.1 },
-  statusChip: { height: 44, paddingHorizontal: 14, justifyContent: "center", borderWidth: 1, borderRadius: 18 },
+  filter: { height: 44, paddingHorizontal: 14, justifyContent: "center", borderWidth: 1, borderRadius: Radius.md, minWidth: 44, flexDirection: "row", alignItems: "center", gap: 6 },
+  filterText: { ...Type.label, letterSpacing: -0.1 },
+  statusChip: { height: 44, paddingHorizontal: 14, justifyContent: "center", borderWidth: 1, borderRadius: Radius.md },
   statusChipText: { fontSize: 12.5, fontWeight: "700" },
   countRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginTop: 20, marginBottom: 8, paddingHorizontal: 2 },
-  countText: { fontSize: 13, fontWeight: "700", letterSpacing: -0.2 },
-  countSub: { fontSize: 11, fontWeight: "500", opacity: 0.7 },
-  row: { borderWidth: 1, borderRadius: 20, padding: 12, flexDirection: "row", alignItems: "center", gap: 12, marginBottom: 10 },
+  countText: { ...Type.label, letterSpacing: -0.2 },
+  countSub: { fontSize: Type.caption.fontSize, lineHeight: Type.caption.lineHeight, fontWeight: "500", opacity: 0.7 },
+  row: { borderWidth: 1, borderRadius: Radius.lg, padding: 12, flexDirection: "row", alignItems: "center", gap: 12, marginBottom: 10 },
   coverStack: { width: 60, height: 60, alignItems: "center", justifyContent: "center" },
-  albumBadge: { position: "absolute", bottom: -4, right: -6, width: 30, height: 30, borderRadius: 15, borderWidth: 2, overflow: "hidden", alignItems: "center", justifyContent: "center" },
+  albumBadge: { position: "absolute", bottom: -4, right: -6, width: 30, height: 30, borderRadius: Radius.sm, borderWidth: 2, overflow: "hidden", alignItems: "center", justifyContent: "center" },
   copy: { flex: 1, gap: 4 },
   copyTop: { flexDirection: "row", gap: 8, alignItems: "center", justifyContent: "space-between" },
   name: { flex: 1, fontSize: 15, fontWeight: "700", letterSpacing: -0.2, lineHeight: 19 },
   phaseRow: { flexDirection: "row", gap: 6, flexWrap: "wrap" },
-  phaseChip: { flexDirection: "row", alignItems: "center", gap: 4, paddingHorizontal: 7, height: 20, borderRadius: 10, borderWidth: 1 },
-  phaseText: { fontSize: 10, fontWeight: "700", letterSpacing: 0.2 },
-  details: { fontSize: 12, lineHeight: 16, opacity: 0.9 },
-  date: { fontSize: 11, fontWeight: "600", opacity: 0.7 },
+  phaseChip: { flexDirection: "row", alignItems: "center", gap: 4, paddingHorizontal: 7, height: 20, borderRadius: Radius.sm, borderWidth: 1 },
+  phaseText: { ...Type.overline, letterSpacing: 0.2 },
+  details: { ...Type.caption, lineHeight: 16, opacity: 0.9 },
+  date: { ...Type.caption, opacity: 0.7 },
   dot: { width: 7, height: 7, borderRadius: 4 },
-  chevron: { width: 32, height: 32, borderRadius: 16, borderWidth: 1, alignItems: "center", justifyContent: "center" },
-  login: { minHeight: 48, borderRadius: 14, alignItems: "center", justifyContent: "center" },
+  chevron: { width: 32, height: 32, borderRadius: Radius.md, borderWidth: 1, alignItems: "center", justifyContent: "center" },
+  login: { minHeight: 48, borderRadius: Radius.sm, alignItems: "center", justifyContent: "center" },
   loginText: { color: "#FFFFFF", fontWeight: "700" },
   bottomBar: { position: "absolute", left: 0, right: 0, bottom: 0, borderTopWidth: 1, paddingHorizontal: 20, paddingTop: 12, flexDirection: "row" },
-  bottomCta: { flex: 1, height: 52, borderRadius: 16, flexDirection: "row", gap: 8, alignItems: "center", justifyContent: "center", overflow: "hidden", borderWidth: 1, borderColor: "rgba(255,255,255,0.12)" },
+  bottomCta: { flex: 1, height: 52, borderRadius: Radius.md, flexDirection: "row", gap: 8, alignItems: "center", justifyContent: "center", overflow: "hidden", borderWidth: 1, borderColor: "rgba(255,255,255,0.12)" },
   bottomCtaText: { color: "#FFFFFF", fontSize: 15, fontWeight: "700", letterSpacing: -0.2 },
 });

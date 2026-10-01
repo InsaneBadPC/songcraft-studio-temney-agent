@@ -7,12 +7,13 @@ import { FlatList, Pressable, RefreshControl, ScrollView, StyleSheet, Text, Text
 import Animated, { FadeIn, FadeInDown, Layout } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
-import { CoverArt, EmptyState, GlassCard, IconButton, Shimmer, StudioHeader } from "@/components/studio-ui";
+import { CoverArt, EmptyState, FilterChip, GlassCard, IconButton, Shimmer, StudioHeader } from "@/components/studio-ui";
 import { ScreenContainer } from "@/components/screen-container";
 import { startPrivateLogin } from "@/constants/oauth";
 import { useAuth } from "@/hooks/use-auth";
 import { useColors } from "@/hooks/use-colors";
 import { trpc } from "@/lib/trpc";
+import { Radius, Type } from "@/lib/design-tokens";
 
 export default function LibraryScreen() {
   const colors = useColors();
@@ -45,7 +46,7 @@ export default function LibraryScreen() {
 
   if (loading || (isAuthenticated && snapshot.isLoading)) {
     return (
-      <ScreenContainer className="px-5">
+      <ScreenContainer inset>
         <View style={{ paddingTop: 14, gap: 12 }}>
           <Shimmer height={36} radius={16} />
           <Shimmer height={48} radius={16} />
@@ -67,14 +68,14 @@ export default function LibraryScreen() {
 
   if (!isAuthenticated) {
     return (
-      <ScreenContainer className="p-5 justify-center">
+      <ScreenContainer centered>
         <EmptyState icon="lock" title="Knihovna je soukromá" text="Přihlas se, aby se hotové skladby načetly z tvého cloudu." action={<Pressable onPress={() => void startPrivateLogin()} style={[styles.login, { backgroundColor: colors.primary }]}><Text style={styles.loginText}>Přihlásit se</Text></Pressable>} />
       </ScreenContainer>
     );
   }
 
   return (
-    <ScreenContainer className="px-5">
+    <ScreenContainer inset>
       <Animated.FlatList
         data={songs}
         keyExtractor={(item) => String(item.id)}
@@ -87,7 +88,7 @@ export default function LibraryScreen() {
               <View style={styles.headerActions}>
                 <IconButton label="YouTube export" icon="video-library" onPress={() => { Haptics.selectionAsync().catch(()=>{}); router.push("/export/youtube" as never); }} />
                 <Pressable onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(()=>{}); router.push("/song/new" as never); }} style={({ pressed }) => [{ transform: [{ scale: pressed ? 0.97 : 1 }], opacity: pressed ? 0.9 : 1 }]}>
-                  <LinearGradient colors={["#3B82F6", "#6366F1"]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={styles.fabGradient}>
+                  <LinearGradient colors={[colors.primary, colors.primaryVibrant]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={styles.fabGradient}>
                     <MaterialIcons name="add" size={22} color="#FFFFFF" />
                   </LinearGradient>
                 </Pressable>
@@ -153,7 +154,7 @@ export default function LibraryScreen() {
                       </View>
                     )}
                     {isPublished && (
-                      <View style={[styles.badge, { backgroundColor: "rgba(59,130,246,0.12)", borderColor: "rgba(59,130,246,0.22)" }]}>
+                      <View style={[styles.badge, { backgroundColor: "rgba(0,217,236,0.12)", borderColor: "rgba(0,217,236,0.22)" }]}>
                         <MaterialIcons name="public" size={12} color={colors.primary} />
                         <Text style={[styles.badgeText, { color: colors.primary }]}>YouTube</Text>
                       </View>
@@ -173,7 +174,7 @@ export default function LibraryScreen() {
       {/* Thumb-zone primary CTA */}
       <View style={[styles.bottomBar, { paddingBottom: insets.bottom + 12, backgroundColor: colors.background, borderTopColor: "rgba(255,255,255,0.06)" }]}>
         <Pressable onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(()=>{}); router.push("/song/new" as never); }} style={({ pressed }) => [styles.bottomCta, { transform: [{ scale: pressed ? 0.97 : 1 }] }]}>
-          <LinearGradient colors={["#3B82F6", "#6366F1", "#8B5CF6"]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={StyleSheet.absoluteFill as any} />
+          <LinearGradient colors={[colors.primary, colors.primaryVibrant]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={StyleSheet.absoluteFill as any} />
           <MaterialIcons name="add" size={20} color="#FFFFFF" />
           <Text style={styles.bottomCtaText}>Nová skladba</Text>
         </Pressable>
@@ -182,43 +183,33 @@ export default function LibraryScreen() {
   );
 }
 
-function FilterChip({ active, label, icon, onPress }: { active: boolean; label: string; icon?: any; onPress: () => void }) {
-  const colors = useColors();
-  return (
-    <Pressable onPress={onPress} style={({ pressed }) => [styles.filter, { backgroundColor: active ? colors.primary : colors.surface, borderColor: active ? colors.primary : "rgba(255,255,255,0.08)", opacity: pressed ? 0.85 : 1, transform: [{ scale: pressed ? 0.97 : 1 }] }]}>
-      {icon ? <MaterialIcons name={icon} size={14} color={active ? "#FFFFFF" : colors.muted} /> : null}
-      <Text numberOfLines={1} style={[styles.filterText, { color: active ? "#FFFFFF" : colors.foreground }]}>{label}</Text>
-    </Pressable>
-  );
-}
-
 const styles = StyleSheet.create({
   content: { paddingTop: 14 },
   headerActions: { flexDirection: "row", alignItems: "center", gap: 8 },
-  fabGradient: { width: 44, height: 44, borderRadius: 14, alignItems: "center", justifyContent: "center" },
-  search: { height: 48, borderRadius: 16, borderWidth: 1, paddingHorizontal: 14, flexDirection: "row", alignItems: "center", gap: 10, marginTop: 4 },
+  fabGradient: { width: 44, height: 44, borderRadius: Radius.sm, alignItems: "center", justifyContent: "center" },
+  search: { height: 48, borderRadius: Radius.md, borderWidth: 1, paddingHorizontal: 14, flexDirection: "row", alignItems: "center", gap: 10, marginTop: 4 },
   searchInput: { flex: 1, fontSize: 15, paddingVertical: 0, fontWeight: "500" },
-  searchClear: { width: 32, height: 32, borderRadius: 16, alignItems: "center", justifyContent: "center", backgroundColor: "rgba(255,255,255,0.06)" },
+  searchClear: { width: 32, height: 32, borderRadius: Radius.md, alignItems: "center", justifyContent: "center", backgroundColor: "rgba(255,255,255,0.06)" },
   filterGroup: { marginTop: 16, gap: 8 },
-  filterLabel: { fontSize: 10, fontWeight: "700", letterSpacing: 1, marginLeft: 2 },
+  filterLabel: { ...Type.overline, letterSpacing: 1, marginLeft: 2 },
   filters: { paddingRight: 20, gap: 8, paddingVertical: 2 },
-  filter: { height: 44, paddingHorizontal: 14, justifyContent: "center", borderWidth: 1, borderRadius: 18, flexDirection: "row", alignItems: "center", gap: 6, minWidth: 44 },
-  filterText: { fontSize: 13, fontWeight: "600", letterSpacing: -0.1 },
+  filter: { height: 44, paddingHorizontal: 14, justifyContent: "center", borderWidth: 1, borderRadius: Radius.md, flexDirection: "row", alignItems: "center", gap: 6, minWidth: 44 },
+  filterText: { ...Type.label, letterSpacing: -0.1 },
   countRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginTop: 20, marginBottom: 8, paddingHorizontal: 2 },
-  countText: { fontSize: 13, fontWeight: "700", letterSpacing: -0.2 },
-  countSub: { fontSize: 11, fontWeight: "500", opacity: 0.7 },
-  row: { borderWidth: 1, borderRadius: 20, padding: 12, flexDirection: "row", alignItems: "center", gap: 12, marginBottom: 10 },
+  countText: { ...Type.label, letterSpacing: -0.2 },
+  countSub: { fontSize: Type.caption.fontSize, lineHeight: Type.caption.lineHeight, fontWeight: "500", opacity: 0.7 },
+  row: { borderWidth: 1, borderRadius: Radius.lg, padding: 12, flexDirection: "row", alignItems: "center", gap: 12, marginBottom: 10 },
   copy: { flex: 1, gap: 5 },
   songName: { fontSize: 16, fontWeight: "700", letterSpacing: -0.3, lineHeight: 20 },
-  songMeta: { fontSize: 12, fontWeight: "500", opacity: 0.9 },
+  songMeta: { ...Type.caption, opacity: 0.9 },
   badges: { flexDirection: "row", gap: 6, marginTop: 2 },
-  badge: { flexDirection: "row", alignItems: "center", gap: 4, paddingHorizontal: 7, height: 22, borderRadius: 12, borderWidth: 1 },
-  badgeText: { fontSize: 10, fontWeight: "700", letterSpacing: 0.3 },
+  badge: { flexDirection: "row", alignItems: "center", gap: 4, paddingHorizontal: 7, height: 22, borderRadius: Radius.sm, borderWidth: 1 },
+  badgeText: { ...Type.overline, letterSpacing: 0.3 },
   dot: { width: 5, height: 5, borderRadius: 3 },
-  chevron: { width: 32, height: 32, borderRadius: 16, borderWidth: 1, alignItems: "center", justifyContent: "center" },
-  login: { minHeight: 48, borderRadius: 14, alignItems: "center", justifyContent: "center" },
+  chevron: { width: 32, height: 32, borderRadius: Radius.md, borderWidth: 1, alignItems: "center", justifyContent: "center" },
+  login: { minHeight: 48, borderRadius: Radius.sm, alignItems: "center", justifyContent: "center" },
   loginText: { color: "#FFFFFF", fontWeight: "700" },
   bottomBar: { position: "absolute", left: 0, right: 0, bottom: 0, borderTopWidth: 1, paddingHorizontal: 20, paddingTop: 12, flexDirection: "row", gap: 12 },
-  bottomCta: { flex: 1, height: 52, borderRadius: 16, flexDirection: "row", gap: 8, alignItems: "center", justifyContent: "center", overflow: "hidden", borderWidth: 1, borderColor: "rgba(255,255,255,0.12)" },
+  bottomCta: { flex: 1, height: 52, borderRadius: Radius.md, flexDirection: "row", gap: 8, alignItems: "center", justifyContent: "center", overflow: "hidden", borderWidth: 1, borderColor: "rgba(255,255,255,0.12)" },
   bottomCtaText: { color: "#FFFFFF", fontSize: 15, fontWeight: "700", letterSpacing: -0.2 },
 });

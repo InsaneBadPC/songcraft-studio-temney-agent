@@ -4,13 +4,14 @@ import { router, useLocalSearchParams } from "expo-router";
 import { useMemo, useState } from "react";
 import { Alert, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 
-import { EmptyState, IconButton, LoadingState, SectionTitle } from "@/components/studio-ui";
+import { EmptyState, IconButton, LoadingState, RatingStars, SectionTitle } from "@/components/studio-ui";
 import { ScreenContainer } from "@/components/screen-container";
 import { startPrivateLogin } from "@/constants/oauth";
 import { useAuth } from "@/hooks/use-auth";
 import { useColors } from "@/hooks/use-colors";
 import { setPickedStylePrompt } from "@/lib/style-prompt-picker";
 import { trpc } from "@/lib/trpc";
+import { OnPrimary, Radius, Type } from "@/lib/design-tokens";
 
 export default function StylePromptLibraryScreen() {
   const colors = useColors();
@@ -39,7 +40,7 @@ export default function StylePromptLibraryScreen() {
   }, [snapshot.data?.stylePrompts, sortByStars]);
 
   if (loading || (isAuthenticated && snapshot.isLoading)) return <ScreenContainer><LoadingState label="Otevírám databázi promptů…" /></ScreenContainer>;
-  if (!isAuthenticated) return <ScreenContainer className="p-5 justify-center"><EmptyState icon="lock" title="Přihlášení je potřeba" text="Databáze promptů je součást tvého soukromého cloudového studia." action={<Pressable onPress={() => void startPrivateLogin()} style={[styles.login, { backgroundColor: colors.primary }]}><Text style={styles.loginText}>Přihlásit se</Text></Pressable>} /></ScreenContainer>;
+  if (!isAuthenticated) return <ScreenContainer centered><EmptyState icon="lock" title="Přihlášení je potřeba" text="Databáze promptů je součást tvého soukromého cloudového studia." action={<Pressable onPress={() => void startPrivateLogin()} style={[styles.login, { backgroundColor: colors.primary }]}><Text style={styles.loginText}>Přihlásit se</Text></Pressable>} /></ScreenContainer>;
 
   const saveNew = async () => {
     if (!content.trim()) { Alert.alert("Chybí text promptu", "Zapiš prompt, který chceš do databáze uložit."); return; }
@@ -68,9 +69,9 @@ export default function StylePromptLibraryScreen() {
     <TextInput value={content} onChangeText={setContent} placeholder="Např. Temný synthwave, 92 BPM, hluboký mužský vokál, analogový bas…" placeholderTextColor={colors.muted} multiline textAlignVertical="top" style={[styles.input, styles.contentInput, { color: colors.foreground, backgroundColor: colors.surface, borderColor: colors.border }]} />
     <TextInput value={note} onChangeText={setNote} placeholder="Poznámka (volitelná) — k čemu se prompt hodí…" placeholderTextColor={colors.muted} multiline textAlignVertical="top" style={[styles.input, styles.noteInput, { color: colors.foreground, backgroundColor: colors.surface, borderColor: colors.border }]} />
     <View style={styles.newRow}>
-      <StarPicker rating={rating} onRate={setRating} size={26} colors={colors} />
+      <RatingStars rating={rating} onRate={setRating} size={26} />
       <Pressable onPress={() => void saveNew()} disabled={createPrompt.isPending || !content.trim()} style={({ pressed }) => [styles.saveButton, { backgroundColor: colors.primary, opacity: !content.trim() || createPrompt.isPending || pressed ? 0.55 : 1 }]}>
-        <MaterialIcons name="bookmark-add" size={18} color="#141317" /><Text style={styles.saveButtonText}>{createPrompt.isPending ? "Ukládám…" : "Uložit do databáze"}</Text>
+        <MaterialIcons name="bookmark-add" size={18} color={OnPrimary} /><Text style={styles.saveButtonText}>{createPrompt.isPending ? "Ukládám…" : "Uložit do databáze"}</Text>
       </Pressable>
     </View>
 
@@ -81,7 +82,7 @@ export default function StylePromptLibraryScreen() {
     {prompts.length ? prompts.map((entry) => (
       <View key={entry.id} style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.border }]}>
         <View style={styles.cardHead}>
-          <StarPicker rating={entry.rating} onRate={(value) => void rate(entry.id, value)} size={19} colors={colors} />
+          <RatingStars rating={entry.rating} onRate={(value) => void rate(entry.id, value)} size={19} />
           <View style={styles.cardActions}>
             <IconButton label="Kopírovat" icon="content-copy" onPress={() => void copyPrompt(entry.content)} />
             {pickMode ? <IconButton label="Použít" icon="check" onPress={() => applyPrompt(entry.content)} /> : null}
@@ -112,12 +113,8 @@ export default function StylePromptLibraryScreen() {
   </ScrollView></ScreenContainer>;
 }
 
-function StarPicker({ rating, onRate, size, colors }: { rating: number; onRate: (value: number) => void; size: number; colors: ReturnType<typeof useColors> }) {
-  return <View style={styles.stars}>{[1, 2, 3, 4, 5].map((value) => <Pressable key={value} onPress={() => onRate(rating === value ? 0 : value)} hitSlop={6}><MaterialIcons name={value <= rating ? "star" : "star-border"} size={size} color={value <= rating ? colors.warning : colors.border} /></Pressable>)}</View>;
-}
-
 function PrimarySmall({ label, onPress, muted, colors }: { label: string; onPress: () => void; muted?: boolean; colors: ReturnType<typeof useColors> }) {
-  return <Pressable onPress={onPress} style={({ pressed }) => [styles.smallButton, { backgroundColor: muted ? colors.surface : colors.primary, borderColor: colors.border, opacity: pressed ? 0.7 : 1 }]}><Text style={[styles.smallButtonText, { color: muted ? colors.muted : "#141317" }]}>{label}</Text></Pressable>;
+  return <Pressable onPress={onPress} style={({ pressed }) => [styles.smallButton, { backgroundColor: muted ? colors.surface : colors.primary, borderColor: colors.border, opacity: pressed ? 0.7 : 1 }]}><Text style={[styles.smallButtonText, { color: muted ? colors.muted : OnPrimary }]}>{label}</Text></Pressable>;
 }
 
 const styles = StyleSheet.create({
@@ -125,27 +122,27 @@ const styles = StyleSheet.create({
   topbar: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
   title: { fontSize: 16, fontWeight: "900" },
   spacer: { width: 44 },
-  intro: { borderWidth: 1, borderRadius: 16, padding: 12, flexDirection: "row", gap: 9, alignItems: "center" },
-  introText: { flex: 1, fontSize: 12, lineHeight: 17 },
-  input: { minHeight: 46, borderWidth: 1, borderRadius: 14, paddingHorizontal: 13, fontSize: 14 },
+  intro: { borderWidth: 1, borderRadius: Radius.md, padding: 12, flexDirection: "row", gap: 9, alignItems: "center" },
+  introText: { flex: 1, ...Type.caption, lineHeight: 17 },
+  input: { minHeight: 46, borderWidth: 1, borderRadius: Radius.sm, paddingHorizontal: 13, ...Type.label },
   contentInput: { minHeight: 84, paddingVertical: 11, lineHeight: 20 },
   noteInput: { minHeight: 58, lineHeight: 18 },
   newRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 10 },
   stars: { flexDirection: "row", gap: 2, alignItems: "center" },
-  saveButton: { minHeight: 44, borderRadius: 14, paddingHorizontal: 15, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 7 },
-  saveButtonText: { color: "#141317", fontWeight: "900", fontSize: 13.5 },
-  sortControl: { minHeight: 40, borderWidth: 1, borderRadius: 13, paddingHorizontal: 12, flexDirection: "row", alignItems: "center", gap: 7 },
+  saveButton: { minHeight: 44, borderRadius: Radius.sm, paddingHorizontal: 15, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 7 },
+  saveButtonText: { color: OnPrimary, fontWeight: "900", fontSize: 13.5 },
+  sortControl: { minHeight: 40, borderWidth: 1, borderRadius: Radius.sm, paddingHorizontal: 12, flexDirection: "row", alignItems: "center", gap: 7 },
   sortText: { flex: 1, fontSize: 12.5, fontWeight: "800" },
-  card: { borderWidth: 1, borderRadius: 18, padding: 13, gap: 10 },
+  card: { borderWidth: 1, borderRadius: Radius.md, padding: 13, gap: 10 },
   cardHead: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 8 },
   cardActions: { flexDirection: "row", alignItems: "center" },
-  promptText: { fontSize: 14, lineHeight: 21 },
-  noteText: { marginTop: 6, fontSize: 12, lineHeight: 16 },
+  promptText: { ...Type.label, lineHeight: 21 },
+  noteText: { marginTop: 6, ...Type.caption, lineHeight: 16 },
   pickHint: { marginTop: 6, fontSize: 11.5, fontWeight: "800" },
   editBox: { gap: 8 },
   editRow: { flexDirection: "row", gap: 8 },
-  smallButton: { minHeight: 38, borderRadius: 11, borderWidth: 1, paddingHorizontal: 13, alignItems: "center", justifyContent: "center" },
+  smallButton: { minHeight: 38, borderRadius: Radius.sm, borderWidth: 1, paddingHorizontal: 13, alignItems: "center", justifyContent: "center" },
   smallButtonText: { fontWeight: "900", fontSize: 12.5 },
-  login: { minHeight: 48, borderRadius: 14, alignItems: "center", justifyContent: "center" },
-  loginText: { color: "#141317", fontWeight: "800" },
+  login: { minHeight: 48, borderRadius: Radius.sm, alignItems: "center", justifyContent: "center" },
+  loginText: { color: OnPrimary, fontWeight: "800" },
 });

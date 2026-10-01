@@ -2,39 +2,60 @@ import { View, type ViewProps } from "react-native";
 import { SafeAreaView, type Edge } from "react-native-safe-area-context";
 import { LinearGradient } from "expo-linear-gradient";
 
-import { cn } from "@/lib/utils";
 import { useColors } from "@/hooks/use-colors";
+import { Hairline, Radius, Space, alpha } from "@/lib/design-tokens";
 
 export interface ScreenContainerProps extends ViewProps {
   edges?: Edge[];
-  className?: string;
-  containerClassName?: string;
-  safeAreaClassName?: string;
+  /** Vodorovne odsazeni obsahu. */
+  inset?: boolean;
+  /** Vycentrovat obsah uprostred obrazovky. */
+  centered?: boolean;
 }
 
 export function ScreenContainer({
   children,
   edges = ["top", "left", "right"],
-  className,
-  containerClassName,
-  safeAreaClassName,
+  inset,
+  centered,
   style,
   ...props
 }: ScreenContainerProps) {
   const colors = useColors();
   return (
-    <View className={cn("flex-1", containerClassName)} style={[{ backgroundColor: "#050A1F" }, style]} {...props}>
-      {/* STUNNING mesh gradient - vibrant, distinctive, not template */}
-      <LinearGradient colors={["rgba(124,58,237,0.12)", "rgba(6,182,214,0.08)", "transparent"]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={{ position: "absolute", top: 0, left: 0, right: 0, height: 420, opacity: 1 }} pointerEvents="none" />
-      <LinearGradient colors={["transparent", "rgba(236,72,153,0.06)", "rgba(124,58,237,0.08)"]} start={{ x: 0, y: 1 }} end={{ x: 1, y: 0 }} style={{ position: "absolute", bottom: 0, left: 0, right: 0, height: 300, opacity: 0.8 }} pointerEvents="none" />
-      {/* Subtle noise + top highlight */}
-      <View style={{ position: "absolute", top: 0, left: 0, right: 0, height: 1, backgroundColor: "rgba(124,58,237,0.18)" }} pointerEvents="none" />
-      <View style={{ position: "absolute", top: 1, left: 0, right: 0, height: 1, backgroundColor: "rgba(255,255,255,0.04)" }} pointerEvents="none" />
-      {/* Floating orbs - distinctive */}
-      <View style={{ position: "absolute", top: -40, right: -30, width: 180, height: 180, borderRadius: 90, backgroundColor: "rgba(124,58,237,0.08)", opacity: 0.6 }} pointerEvents="none" />
-      <View style={{ position: "absolute", top: 120, left: -20, width: 120, height: 120, borderRadius: 60, backgroundColor: "rgba(6,182,214,0.06)", opacity: 0.5 }} pointerEvents="none" />
-      <SafeAreaView edges={edges} className={cn("flex-1", safeAreaClassName)} style={{ flex: 1 }}>
-        <View className={cn("flex-1", className)}>{children}</View>
+    <View style={[{ backgroundColor: colors.background }, style]} {...props}>
+      {/* Jeden zklidneny akcentovy glow odev, ne plocha. */}
+      <LinearGradient
+        colors={[alpha(colors.primary, 0.13), alpha(colors.primary, 0.04), "transparent"]}
+        start={{ x: 0.1, y: 0 }}
+        end={{ x: 0.9, y: 1 }}
+        style={{ position: "absolute", top: 0, left: 0, right: 0, height: 380 }}
+        pointerEvents="none"
+      />
+      {/* Tepla stopa, ktera odlise stranku od sousedni. */}
+      <View
+        style={{
+          position: "absolute",
+          top: -60,
+          right: -50,
+          width: 220,
+          height: 220,
+          borderRadius: Radius.pill,
+          backgroundColor: alpha(colors.secondary, 0.07),
+        }}
+        pointerEvents="none"
+      />
+      <View style={{ position: "absolute", top: 0, left: 0, right: 0, height: 1, backgroundColor: Hairline }} pointerEvents="none" />
+      <SafeAreaView edges={edges} style={{ flex: 1 }}>
+        <View
+          style={[
+            { flex: 1 },
+            inset ? { paddingHorizontal: Space.xl } : null,
+            centered ? { alignItems: "center", justifyContent: "center", padding: Space.xl } : null,
+          ]}
+        >
+          {children}
+        </View>
       </SafeAreaView>
     </View>
   );

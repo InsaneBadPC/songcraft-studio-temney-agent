@@ -5,6 +5,7 @@ import { ActivityIndicator, Linking, Pressable, StyleSheet, Text, View } from "r
 import { formatDate } from "@/components/studio-ui";
 import { useColors } from "@/hooks/use-colors";
 import { getVideoDownloadUrl, listVideoJobs, type StudioVideoJob } from "@/lib/video-jobs";
+import { Radius, Type } from "@/lib/design-tokens";
 
 export function VideoJobsCard() {
   const colors = useColors();
@@ -63,18 +64,18 @@ function statusColor(status: string, colors: ReturnType<typeof useColors>) {
 }
 
 const styles = StyleSheet.create({
-  card: { borderWidth: 1, borderRadius: 20, padding: 14, gap: 10, marginTop: 2 },
-  loading: { fontSize: 12, textAlign: "center", flex: 1 },
-  error: { fontSize: 12, lineHeight: 17, flex: 1 },
+  card: { borderWidth: 1, borderRadius: Radius.lg, padding: 14, gap: 10, marginTop: 2 },
+  loading: { ...Type.caption, textAlign: "center", flex: 1 },
+  error: { ...Type.caption, lineHeight: 17, flex: 1 },
   head: { flexDirection: "row", alignItems: "center" },
   headCopy: { flex: 1, gap: 2 },
   title: { fontSize: 15, fontWeight: "900" },
-  subtitle: { fontSize: 11 },
+  subtitle: { ...Type.caption },
   refresh: { width: 36, height: 36, alignItems: "center", justifyContent: "center" },
   row: { minHeight: 48, flexDirection: "row", alignItems: "center", gap: 9 },
-  statusIcon: { width: 34, height: 34, borderRadius: 11, alignItems: "center", justifyContent: "center" },
+  statusIcon: { width: 34, height: 34, borderRadius: Radius.sm, alignItems: "center", justifyContent: "center" },
   rowCopy: { flex: 1, gap: 2 },
-  rowTitle: { fontSize: 13, fontWeight: "800" },
+  rowTitle: { ...Type.label },
   rowMeta: { fontSize: 10.5, lineHeight: 14 },
-  download: { width: 38, height: 38, borderRadius: 12, alignItems: "center", justifyContent: "center" },
+  download: { width: 38, height: 38, borderRadius: Radius.sm, alignItems: "center", justifyContent: "center" },
 });

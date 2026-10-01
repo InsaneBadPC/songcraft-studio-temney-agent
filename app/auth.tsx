@@ -6,6 +6,7 @@ import { Alert, Pressable, StyleSheet, Text, TextInput, View } from "react-nativ
 import { ScreenContainer } from "@/components/screen-container";
 import { useColors } from "@/hooks/use-colors";
 import { supabase } from "@/lib/supabase";
+import { OnPrimary, Radius, Type } from "@/lib/design-tokens";
 
 const PRIVATE_ACCOUNTS = [
   { id: "temney", name: "Temney", email: "temney@songcraft.test", description: "Autor a hlavní studio" },
@@ -40,7 +41,7 @@ export default function AuthScreen() {
   };
 
   return (
-    <ScreenContainer className="p-5 justify-center">
+    <ScreenContainer centered>
       <View style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.border }]}>
         <View style={[styles.icon, { backgroundColor: `${colors.primary}25` }]}>
           <MaterialIcons name="lock-person" size={29} color={colors.primary} />
@@ -99,19 +100,19 @@ export default function AuthScreen() {
 }
 
 const styles = StyleSheet.create({
-  card: { borderWidth: 1, borderRadius: 24, padding: 20, gap: 12 },
-  icon: { width: 58, height: 58, borderRadius: 19, alignItems: "center", justifyContent: "center" },
-  title: { fontSize: 22, fontWeight: "900", marginTop: 4 },
-  text: { fontSize: 13, lineHeight: 19, marginBottom: 5 },
+  card: { borderWidth: 1, borderRadius: Radius.xl, padding: 20, gap: 12 },
+  icon: { width: 58, height: 58, borderRadius: Radius.lg, alignItems: "center", justifyContent: "center" },
+  title: { fontSize: Type.title.fontSize, lineHeight: Type.title.lineHeight, fontWeight: "900", marginTop: 4 },
+  text: { ...Type.label, lineHeight: 19, marginBottom: 5 },
   accountList: { gap: 8 },
-  account: { minHeight: 65, borderWidth: 1, borderRadius: 16, padding: 10, flexDirection: "row", alignItems: "center", gap: 10 },
-  avatar: { width: 38, height: 38, borderRadius: 13, alignItems: "center", justifyContent: "center" },
+  account: { minHeight: 65, borderWidth: 1, borderRadius: Radius.md, padding: 10, flexDirection: "row", alignItems: "center", gap: 10 },
+  avatar: { width: 38, height: 38, borderRadius: Radius.sm, alignItems: "center", justifyContent: "center" },
   avatarText: { fontSize: 16, fontWeight: "900" },
   accountCopy: { flex: 1, gap: 2 },
-  accountName: { fontSize: 14, fontWeight: "900" },
-  accountDescription: { fontSize: 11, lineHeight: 15 },
-  input: { minHeight: 50, borderWidth: 1, borderRadius: 14, paddingHorizontal: 13, fontSize: 15, marginTop: 3 },
-  primary: { height: 51, borderRadius: 15, alignItems: "center", justifyContent: "center", marginTop: 2 },
-  primaryText: { color: "#141317", fontSize: 15, fontWeight: "900" },
-  note: { fontSize: 11, lineHeight: 16, textAlign: "center", marginTop: 2 },
+  accountName: { fontSize: Type.label.fontSize, lineHeight: Type.label.lineHeight, fontWeight: "900" },
+  accountDescription: { ...Type.caption, lineHeight: 15 },
+  input: { minHeight: 50, borderWidth: 1, borderRadius: Radius.sm, paddingHorizontal: 13, fontSize: 15, marginTop: 3 },
+  primary: { height: 51, borderRadius: Radius.sm, alignItems: "center", justifyContent: "center", marginTop: 2 },
+  primaryText: { color: OnPrimary, fontSize: 15, fontWeight: "900" },
+  note: { ...Type.caption, lineHeight: 16, textAlign: "center", marginTop: 2 },
 });

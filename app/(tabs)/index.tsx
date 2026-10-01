@@ -10,6 +10,7 @@ import { startPrivateLogin } from "@/constants/oauth";
 import { useAuth } from "@/hooks/use-auth";
 import { useColors } from "@/hooks/use-colors";
 import { trpc } from "@/lib/trpc";
+import { Radius, Type } from "@/lib/design-tokens";
 
 export default function HomeScreen() {
   const colors = useColors();
@@ -36,18 +37,18 @@ export default function HomeScreen() {
 
   if (loading || (isAuthenticated && snapshot.isLoading)) return <ScreenContainer><LoadingState /></ScreenContainer>;
   if (!isAuthenticated) {
-    return <ScreenContainer className="p-5 justify-center">
+    return <ScreenContainer centered>
       <EmptyState icon="lock" title="Tvoje studio je soukromé" text="Přihlas se a pokračuj v textech, obalech a verzích skladeb." action={<PrimaryButton label="Přihlásit se" icon="login" onPress={() => void startPrivateLogin()} />} />
     </ScreenContainer>;
   }
 
   if (snapshot.isError) {
-    return <ScreenContainer className="p-5 justify-center">
+    return <ScreenContainer centered>
       <EmptyState icon="cloud-off" title="Studio se nepodařilo načíst" text={snapshot.error instanceof Error ? snapshot.error.message : "Zkontroluj připojení a zkus synchronizaci zopakovat."} action={<PrimaryButton label="Zkusit znovu" icon="refresh" onPress={onRefresh} />} />
     </ScreenContainer>;
   }
 
-  return <ScreenContainer className="px-5">
+  return <ScreenContainer inset>
     <FlatList
       data={recent}
       keyExtractor={(item) => String(item.id)}
@@ -120,29 +121,29 @@ function AttentionCard({ icon, value, label, color, onPress }: { icon: Component
 const styles = StyleSheet.create({
   content: { paddingTop: 14, paddingBottom: 36, gap: 12 },
   topRow: { flexDirection: "row", alignItems: "flex-start" },
-  syncButton: { width: 44, height: 44, borderRadius: 14, borderWidth: 1, alignItems: "center", justifyContent: "center", marginTop: 5, marginLeft: 8 },
+  syncButton: { width: 44, height: 44, borderRadius: Radius.sm, borderWidth: 1, alignItems: "center", justifyContent: "center", marginTop: 5, marginLeft: 8 },
   syncLine: { flexDirection: "row", alignItems: "center", gap: 7, marginTop: -4, marginBottom: 2 },
   syncDot: { width: 7, height: 7, borderRadius: 4 },
-  syncText: { fontSize: 12, fontWeight: "600" },
-  hero: { borderWidth: 1, borderRadius: 24, padding: 20, gap: 18, marginTop: 2 },
+  syncText: { ...Type.caption },
+  hero: { borderWidth: 1, borderRadius: Radius.xl, padding: 20, gap: 18, marginTop: 2 },
   heroCopy: { gap: 7 },
-  eyebrow: { fontSize: 10, fontWeight: "900", letterSpacing: 1.1 },
-  heroTitle: { fontSize: 22, lineHeight: 28, fontWeight: "900" },
-  heroText: { fontSize: 14, lineHeight: 20 },
+  eyebrow: { fontSize: Type.overline.fontSize, lineHeight: Type.overline.lineHeight, fontWeight: "900", letterSpacing: 1.1 },
+  heroTitle: { ...Type.title, lineHeight: 28, fontWeight: "900" },
+  heroText: { ...Type.label, lineHeight: 20 },
   heroActions: { gap: 9 },
-  secondaryAction: { minHeight: 44, borderRadius: 14, borderWidth: 1, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8 },
-  secondaryActionText: { fontSize: 14, fontWeight: "800" },
+  secondaryAction: { minHeight: 44, borderRadius: Radius.sm, borderWidth: 1, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8 },
+  secondaryActionText: { fontSize: Type.label.fontSize, lineHeight: Type.label.lineHeight, fontWeight: "800" },
   quickActions: { flexDirection: "row", gap: 8, marginTop: 2 },
-  quickAction: { flex: 1, minHeight: 82, borderRadius: 17, borderWidth: 1, padding: 11, gap: 4 },
-  quickLabel: { fontSize: 12, fontWeight: "800" },
-  quickDetail: { fontSize: 10, lineHeight: 14 },
+  quickAction: { flex: 1, minHeight: 82, borderRadius: Radius.md, borderWidth: 1, padding: 11, gap: 4 },
+  quickLabel: { fontSize: Type.caption.fontSize, lineHeight: Type.caption.lineHeight, fontWeight: "800" },
+  quickDetail: { ...Type.overline, lineHeight: 14 },
   attentionGrid: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
-  attentionCard: { width: "48.5%", minHeight: 88, borderRadius: 17, borderWidth: 1, padding: 12, gap: 4 },
-  attentionValue: { fontSize: 22, fontWeight: "900" },
-  attentionLabel: { fontSize: 11, lineHeight: 15, fontWeight: "600" },
-  documentRow: { minHeight: 72, borderRadius: 18, borderWidth: 1, padding: 10, flexDirection: "row", alignItems: "center", gap: 10, marginBottom: 2 },
+  attentionCard: { width: "48.5%", minHeight: 88, borderRadius: Radius.md, borderWidth: 1, padding: 12, gap: 4 },
+  attentionValue: { fontSize: Type.title.fontSize, lineHeight: Type.title.lineHeight, fontWeight: "900" },
+  attentionLabel: { ...Type.caption },
+  documentRow: { minHeight: 72, borderRadius: Radius.md, borderWidth: 1, padding: 10, flexDirection: "row", alignItems: "center", gap: 10, marginBottom: 2 },
   rowCopy: { flex: 1, gap: 4 },
   rowTitle: { fontSize: 15, fontWeight: "800" },
-  rowMeta: { fontSize: 11, lineHeight: 15 },
-  link: { fontSize: 13, fontWeight: "800" },
+  rowMeta: { ...Type.caption, lineHeight: 15 },
+  link: { ...Type.label },
 });

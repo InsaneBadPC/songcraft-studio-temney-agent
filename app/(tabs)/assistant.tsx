@@ -16,6 +16,7 @@ import type { StudioAssistantMessage } from "@/lib/assistant-chat";
 import { MAX_ASSISTANT_CONVERSATIONS, upsertAssistantConversation, type AssistantConversation } from "@/lib/assistant-history";
 import { useAuth } from "@/hooks/use-auth";
 import { useColors } from "@/hooks/use-colors";
+import { OnPrimary, Radius, Type } from "@/lib/design-tokens";
 
 const SUGGESTIONS = [
   { icon: "auto-awesome" as const, text: "Navrhni refrén podle mých textů", sub: "Analýza stylu + nálady" },
@@ -158,7 +159,7 @@ export default function AssistantScreen() {
           {SUGGESTIONS.map((s, i) => (
             <Animated.View key={s.text} entering={FadeInDown.delay(i * 80).duration(420)} layout={Layout.springify()}>
               <Pressable onPress={() => { Haptics.selectionAsync().catch(()=>{}); setDraft(s.text); }} disabled={inputDisabled} style={({ pressed }) => [styles.suggestion, { backgroundColor: colors.surface, borderColor: "rgba(255,255,255,0.08)", shadowColor: "#000", shadowOpacity: pressed ? 0.08 : 0.12, shadowRadius: 12, elevation: 3, opacity: pressed || inputDisabled ? 0.85 : 1, transform: [{ scale: pressed ? 0.98 : 1 }] }]}>
-                <LinearGradient colors={["rgba(59,130,246,0.12)", "rgba(139,92,246,0.10)"]} style={styles.suggestionIconBg}>
+                <LinearGradient colors={["rgba(0,217,236,0.12)", "rgba(139,92,246,0.10)"]} style={styles.suggestionIconBg}>
                   <MaterialIcons name={s.icon} size={18} color={colors.primary} />
                 </LinearGradient>
                 <View style={{ flex: 1, gap: 2 }}><Text style={[styles.suggestionText, { color: colors.foreground }]}>{s.text}</Text><Text style={[styles.suggestionSub, { color: colors.muted }]}>{s.sub}</Text></View>
@@ -228,10 +229,10 @@ export default function AssistantScreen() {
   }
 
   if (loading) return <ScreenContainer><View style={{ padding: 20, gap: 12 }}><Shimmer height={20} width="60%" /><Shimmer height={14} /><Shimmer height={14} width="80%" /></View></ScreenContainer>;
-  if (!isAuthenticated) return <ScreenContainer className="p-5 justify-center"><View style={[styles.emptyCard, { backgroundColor: colors.surface, borderColor: "rgba(255,255,255,0.08)" }]}><View style={[styles.emptyIcon, { backgroundColor: `${colors.primary}14` }]}><MaterialIcons name="lock" size={28} color={colors.primary} /></View><Text style={[styles.emptyTitle, { color: colors.foreground }]}>Přihlášení je potřeba</Text><Text style={[styles.emptyText, { color: colors.muted }]}>Asistent pracuje jen s tvými materiály.</Text><Pressable onPress={() => void startPrivateLogin()} style={({ pressed }) => [styles.loginBtn, { opacity: pressed ? 0.9 : 1, transform: [{ scale: pressed ? 0.97 : 1 }] }]}><LinearGradient colors={["#3B82F6","#6366F1"]} style={StyleSheet.absoluteFill as any} /><Text style={styles.loginText}>Přihlásit se</Text></Pressable></View></ScreenContainer>;
+  if (!isAuthenticated) return <ScreenContainer centered><View style={[styles.emptyCard, { backgroundColor: colors.surface, borderColor: "rgba(255,255,255,0.08)" }]}><View style={[styles.emptyIcon, { backgroundColor: `${colors.primary}14` }]}><MaterialIcons name="lock" size={28} color={colors.primary} /></View><Text style={[styles.emptyTitle, { color: colors.foreground }]}>Přihlášení je potřeba</Text><Text style={[styles.emptyText, { color: colors.muted }]}>Asistent pracuje jen s tvými materiály.</Text><Pressable onPress={() => void startPrivateLogin()} style={({ pressed }) => [styles.loginBtn, { opacity: pressed ? 0.9 : 1, transform: [{ scale: pressed ? 0.97 : 1 }] }]}><LinearGradient colors={[colors.primary, colors.primaryVibrant]} style={StyleSheet.absoluteFill as any} /><Text style={styles.loginText}>Přihlásit se</Text></Pressable></View></ScreenContainer>;
 
   return (
-    <ScreenContainer className="px-5" style={{ backgroundColor: colors.background }}>
+    <ScreenContainer inset style={{ backgroundColor: colors.background }}>
       <KeyboardAvoidingView style={styles.grow} behavior={Platform.OS === "ios" ? "padding" : undefined} keyboardVerticalOffset={insets.top}>
         <FlatList
           ref={flatListRef}
@@ -274,56 +275,56 @@ export default function AssistantScreen() {
 const styles = StyleSheet.create({
   grow: { flex: 1 },
   content: { paddingTop: 14, paddingBottom: 14, gap: 12 },
-  notice: { flexDirection: "row", gap: 12, borderRadius: 20, borderWidth: 1, padding: 14, marginBottom: 14, alignItems: "center" },
-  noticeIcon: { width: 36, height: 36, borderRadius: 12, borderWidth: 1, alignItems: "center", justifyContent: "center" },
-  noticeText: { flex: 1, fontSize: 12, lineHeight: 17, fontWeight: "500" },
+  notice: { flexDirection: "row", gap: 12, borderRadius: Radius.lg, borderWidth: 1, padding: 14, marginBottom: 14, alignItems: "center" },
+  noticeIcon: { width: 36, height: 36, borderRadius: Radius.sm, borderWidth: 1, alignItems: "center", justifyContent: "center" },
+  noticeText: { flex: 1, ...Type.caption },
   historyBlock: { gap: 10, marginBottom: 14 },
   historyHead: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
-  historyTitle: { fontSize: 10, fontWeight: "700", letterSpacing: 1 },
-  newConv: { flexDirection: "row", alignItems: "center", gap: 4, paddingHorizontal: 12, height: 30, borderRadius: 15 },
-  newConvText: { color: "#FFFFFF", fontSize: 12, fontWeight: "700" },
+  historyTitle: { ...Type.overline, letterSpacing: 1 },
+  newConv: { flexDirection: "row", alignItems: "center", gap: 4, paddingHorizontal: 12, height: 30, borderRadius: Radius.sm },
+  newConvText: { color: "#FFFFFF", ...Type.caption },
   historyRow: { gap: 8, paddingRight: 12, paddingVertical: 2 },
-  historyChip: { flexDirection: "row", alignItems: "center", gap: 6, maxWidth: 220, paddingHorizontal: 12, height: 34, borderRadius: 17, borderWidth: 1 },
-  historyChipText: { fontSize: 12, fontWeight: "600", flexShrink: 1 },
+  historyChip: { flexDirection: "row", alignItems: "center", gap: 6, maxWidth: 220, paddingHorizontal: 12, height: 34, borderRadius: Radius.md, borderWidth: 1 },
+  historyChipText: { ...Type.caption, flexShrink: 1 },
   suggestions: { gap: 10, marginBottom: 6 },
-  suggestionTitle: { fontSize: 13, fontWeight: "700", marginBottom: 2, letterSpacing: -0.2 },
-  suggestion: { minHeight: 62, borderRadius: 20, borderWidth: 1, paddingHorizontal: 14, paddingVertical: 12, flexDirection: "row", alignItems: "center", gap: 12 },
-  suggestionIconBg: { width: 36, height: 36, borderRadius: 12, alignItems: "center", justifyContent: "center" },
-  suggestionText: { fontSize: 14, fontWeight: "600", letterSpacing: -0.2 },
-  suggestionSub: { fontSize: 11, fontWeight: "500", marginTop: 1 },
-  disclaimer: { fontSize: 11, lineHeight: 15, marginTop: 6, textAlign: "center", opacity: 0.7 },
-  message: { maxWidth: "88%", borderRadius: 20, padding: 14, gap: 8, borderWidth: 1 },
+  suggestionTitle: { ...Type.label, marginBottom: 2, letterSpacing: -0.2 },
+  suggestion: { minHeight: 62, borderRadius: Radius.lg, borderWidth: 1, paddingHorizontal: 14, paddingVertical: 12, flexDirection: "row", alignItems: "center", gap: 12 },
+  suggestionIconBg: { width: 36, height: 36, borderRadius: Radius.sm, alignItems: "center", justifyContent: "center" },
+  suggestionText: { ...Type.label, letterSpacing: -0.2 },
+  suggestionSub: { fontSize: Type.caption.fontSize, lineHeight: Type.caption.lineHeight, fontWeight: "500", marginTop: 1 },
+  disclaimer: { ...Type.caption, lineHeight: 15, marginTop: 6, textAlign: "center", opacity: 0.7 },
+  message: { maxWidth: "88%", borderRadius: Radius.lg, padding: 14, gap: 8, borderWidth: 1 },
   messageHead: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 10 },
   roleRow: { flexDirection: "row", alignItems: "center", gap: 6 },
   roleDot: { width: 6, height: 6, borderRadius: 3 },
-  copyChip: { flexDirection: "row", alignItems: "center", gap: 4, paddingHorizontal: 8, height: 26, borderRadius: 13, borderWidth: 1, borderColor: "rgba(255,255,255,0.10)", backgroundColor: "rgba(255,255,255,0.04)" },
-  copyChipText: { fontSize: 11, fontWeight: "600" },
+  copyChip: { flexDirection: "row", alignItems: "center", gap: 4, paddingHorizontal: 8, height: 26, borderRadius: Radius.sm, borderWidth: 1, borderColor: "rgba(255,255,255,0.10)", backgroundColor: "rgba(255,255,255,0.04)" },
+  copyChipText: { ...Type.caption },
   userMessage: { alignSelf: "flex-end", borderBottomRightRadius: 6, borderWidth: 0 },
   assistantMessage: { alignSelf: "flex-start", borderBottomLeftRadius: 6 },
-  messageRole: { fontSize: 11, fontWeight: "700", letterSpacing: 0.3 },
-  messageText: { fontSize: 15, lineHeight: 22, fontWeight: "400" },
-  thinking: { alignSelf: "flex-start", flexDirection: "row", gap: 10, alignItems: "center", borderWidth: 1, borderRadius: 16, paddingHorizontal: 14, paddingVertical: 10 },
+  messageRole: { ...Type.caption, letterSpacing: 0.3 },
+  messageText: { ...Type.body },
+  thinking: { alignSelf: "flex-start", flexDirection: "row", gap: 10, alignItems: "center", borderWidth: 1, borderRadius: Radius.md, paddingHorizontal: 14, paddingVertical: 10 },
   thinkingDots: { flexDirection: "row", gap: 4, alignItems: "center" },
   dot: { width: 6, height: 6, borderRadius: 3 },
-  thinkingText: { fontSize: 12, fontWeight: "600" },
-  pendingPanel: { borderWidth: 1, borderRadius: 16, padding: 12, marginBottom: 8, gap: 10 },
+  thinkingText: { ...Type.caption },
+  pendingPanel: { borderWidth: 1, borderRadius: Radius.md, padding: 12, marginBottom: 8, gap: 10 },
   pendingHeader: { flexDirection: "row", alignItems: "center", gap: 7 },
-  pendingTitle: { fontSize: 13, fontWeight: "800" },
+  pendingTitle: { ...Type.label },
   pendingAction: { flexDirection: "row", alignItems: "center", gap: 10 },
   pendingCopy: { flex: 1, gap: 2 },
-  pendingActionTitle: { fontSize: 13, fontWeight: "800" },
-  pendingActionText: { fontSize: 11, lineHeight: 15 },
-  confirmButton: { minHeight: 40, paddingHorizontal: 13, borderRadius: 12, backgroundColor: "#F59E0B", alignItems: "center", justifyContent: "center" },
-  confirmButtonText: { color: "#141317", fontSize: 12, fontWeight: "900" },
-  errorBox: { flexDirection: "row", gap: 8, alignItems: "center", borderWidth: 1, borderRadius: 12, padding: 12, marginBottom: 8 },
-  errorText: { flex: 1, fontSize: 12, fontWeight: "500" },
-  composer: { flexDirection: "row", alignItems: "flex-end", gap: 10, borderWidth: 1, borderRadius: 20, padding: 8, marginBottom: 8, marginTop: 4 },
+  pendingActionTitle: { ...Type.label },
+  pendingActionText: { ...Type.caption, lineHeight: 15 },
+  confirmButton: { minHeight: 40, paddingHorizontal: 13, borderRadius: Radius.sm, backgroundColor: "#F59E0B", alignItems: "center", justifyContent: "center" },
+  confirmButtonText: { color: OnPrimary, fontSize: Type.caption.fontSize, lineHeight: Type.caption.lineHeight, fontWeight: "900" },
+  errorBox: { flexDirection: "row", gap: 8, alignItems: "center", borderWidth: 1, borderRadius: Radius.sm, padding: 12, marginBottom: 8 },
+  errorText: { flex: 1, ...Type.caption },
+  composer: { flexDirection: "row", alignItems: "flex-end", gap: 10, borderWidth: 1, borderRadius: Radius.lg, padding: 8, marginBottom: 8, marginTop: 4 },
   input: { flex: 1, minHeight: 42, maxHeight: 112, paddingHorizontal: 10, paddingVertical: 10, fontSize: 15, lineHeight: 20 },
-  send: { width: 44, height: 44, borderRadius: 14, alignItems: "center", justifyContent: "center" },
-  emptyCard: { borderWidth: 1, borderRadius: 24, padding: 28, alignItems: "center", gap: 10 },
-  emptyIcon: { width: 64, height: 64, borderRadius: 20, alignItems: "center", justifyContent: "center" },
-  emptyTitle: { fontSize: 18, fontWeight: "700", textAlign: "center" },
-  emptyText: { fontSize: 14, lineHeight: 20, textAlign: "center", opacity: 0.8 },
-  loginBtn: { marginTop: 12, height: 48, borderRadius: 14, alignItems: "center", justifyContent: "center", paddingHorizontal: 20, overflow: "hidden", minWidth: 160 },
+  send: { width: 44, height: 44, borderRadius: Radius.sm, alignItems: "center", justifyContent: "center" },
+  emptyCard: { borderWidth: 1, borderRadius: Radius.xl, padding: 28, alignItems: "center", gap: 10 },
+  emptyIcon: { width: 64, height: 64, borderRadius: Radius.lg, alignItems: "center", justifyContent: "center" },
+  emptyTitle: { ...Type.heading, textAlign: "center" },
+  emptyText: { ...Type.label, lineHeight: 20, textAlign: "center", opacity: 0.8 },
+  loginBtn: { marginTop: 12, height: 48, borderRadius: Radius.sm, alignItems: "center", justifyContent: "center", paddingHorizontal: 20, overflow: "hidden", minWidth: 160 },
   loginText: { color: "#FFFFFF", fontWeight: "700", zIndex: 1 },
 });
