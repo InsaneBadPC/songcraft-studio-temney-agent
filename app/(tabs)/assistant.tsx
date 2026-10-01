@@ -229,10 +229,10 @@ export default function AssistantScreen() {
   }
 
   if (loading) return <ScreenContainer><View style={{ padding: 20, gap: 12 }}><Shimmer height={20} width="60%" /><Shimmer height={14} /><Shimmer height={14} width="80%" /></View></ScreenContainer>;
-  if (!isAuthenticated) return <ScreenContainer centered><View style={[styles.emptyCard, { backgroundColor: colors.surface, borderColor: "rgba(255,255,255,0.08)" }]}><View style={[styles.emptyIcon, { backgroundColor: `${colors.primary}14` }]}><MaterialIcons name="lock" size={28} color={colors.primary} /></View><Text style={[styles.emptyTitle, { color: colors.foreground }]}>Přihlášení je potřeba</Text><Text style={[styles.emptyText, { color: colors.muted }]}>Asistent pracuje jen s tvými materiály.</Text><Pressable onPress={() => void startPrivateLogin()} style={({ pressed }) => [styles.loginBtn, { opacity: pressed ? 0.9 : 1, transform: [{ scale: pressed ? 0.97 : 1 }] }]}><LinearGradient colors={[colors.primary, colors.primaryVibrant]} style={StyleSheet.absoluteFill as any} /><Text style={styles.loginText}>Přihlásit se</Text></Pressable></View></ScreenContainer>;
+  if (!isAuthenticated) return <ScreenContainer className="p-5 justify-center"><View style={[styles.emptyCard, { backgroundColor: colors.surface, borderColor: "rgba(255,255,255,0.08)" }]}><View style={[styles.emptyIcon, { backgroundColor: `${colors.primary}14` }]}><MaterialIcons name="lock" size={28} color={colors.primary} /></View><Text style={[styles.emptyTitle, { color: colors.foreground }]}>Přihlášení je potřeba</Text><Text style={[styles.emptyText, { color: colors.muted }]}>Asistent pracuje jen s tvými materiály.</Text><Pressable onPress={() => void startPrivateLogin()} style={({ pressed }) => [styles.loginBtn, { opacity: pressed ? 0.9 : 1, transform: [{ scale: pressed ? 0.97 : 1 }] }]}><LinearGradient colors={[colors.primary, colors.primaryVibrant]} style={StyleSheet.absoluteFill as any} /><Text style={styles.loginText}>Přihlásit se</Text></Pressable></View></ScreenContainer>;
 
   return (
-    <ScreenContainer inset style={{ backgroundColor: colors.background }}>
+    <ScreenContainer className="px-5" style={{ backgroundColor: colors.background }}>
       <KeyboardAvoidingView style={styles.grow} behavior={Platform.OS === "ios" ? "padding" : undefined} keyboardVerticalOffset={insets.top}>
         <FlatList
           ref={flatListRef}

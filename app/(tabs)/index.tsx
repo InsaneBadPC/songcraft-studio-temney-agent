@@ -37,18 +37,18 @@ export default function HomeScreen() {
 
   if (loading || (isAuthenticated && snapshot.isLoading)) return <ScreenContainer><LoadingState /></ScreenContainer>;
   if (!isAuthenticated) {
-    return <ScreenContainer centered>
+    return <ScreenContainer className="p-5 justify-center">
       <EmptyState icon="lock" title="Tvoje studio je soukromé" text="Přihlas se a pokračuj v textech, obalech a verzích skladeb." action={<PrimaryButton label="Přihlásit se" icon="login" onPress={() => void startPrivateLogin()} />} />
     </ScreenContainer>;
   }
 
   if (snapshot.isError) {
-    return <ScreenContainer centered>
+    return <ScreenContainer className="p-5 justify-center">
       <EmptyState icon="cloud-off" title="Studio se nepodařilo načíst" text={snapshot.error instanceof Error ? snapshot.error.message : "Zkontroluj připojení a zkus synchronizaci zopakovat."} action={<PrimaryButton label="Zkusit znovu" icon="refresh" onPress={onRefresh} />} />
     </ScreenContainer>;
   }
 
-  return <ScreenContainer inset>
+  return <ScreenContainer className="px-5">
     <FlatList
       data={recent}
       keyExtractor={(item) => String(item.id)}

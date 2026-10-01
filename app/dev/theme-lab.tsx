@@ -64,7 +64,7 @@ export default function ThemeLabScreen() {
   ];
 
   return (
-    <ScreenContainer inset>
+    <ScreenContainer className="p-5">
       <ScrollView contentContainerStyle={styles.content}>
         <View style={styles.row}>
           {(["light", "dark"] as ColorScheme[]).map((scheme) => (

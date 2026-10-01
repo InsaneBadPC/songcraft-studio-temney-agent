@@ -40,7 +40,7 @@ export default function StylePromptLibraryScreen() {
   }, [snapshot.data?.stylePrompts, sortByStars]);
 
   if (loading || (isAuthenticated && snapshot.isLoading)) return <ScreenContainer><LoadingState label="Otevírám databázi promptů…" /></ScreenContainer>;
-  if (!isAuthenticated) return <ScreenContainer centered><EmptyState icon="lock" title="Přihlášení je potřeba" text="Databáze promptů je součást tvého soukromého cloudového studia." action={<Pressable onPress={() => void startPrivateLogin()} style={[styles.login, { backgroundColor: colors.primary }]}><Text style={styles.loginText}>Přihlásit se</Text></Pressable>} /></ScreenContainer>;
+  if (!isAuthenticated) return <ScreenContainer className="p-5 justify-center"><EmptyState icon="lock" title="Přihlášení je potřeba" text="Databáze promptů je součást tvého soukromého cloudového studia." action={<Pressable onPress={() => void startPrivateLogin()} style={[styles.login, { backgroundColor: colors.primary }]}><Text style={styles.loginText}>Přihlásit se</Text></Pressable>} /></ScreenContainer>;
 
   const saveNew = async () => {
     if (!content.trim()) { Alert.alert("Chybí text promptu", "Zapiš prompt, který chceš do databáze uložit."); return; }

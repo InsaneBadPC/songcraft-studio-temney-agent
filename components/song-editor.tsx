@@ -105,7 +105,7 @@ export function SongEditor({ songId }: { songId?: string }) {
   }, []));
   if (isAuthenticated && userId && !draftReady && (!songId || song)) return <ScreenContainer><LoadingState /></ScreenContainer>;
   if (songId && snapshot.isLoading) return <ScreenContainer><LoadingState /></ScreenContainer>;
-  if (songId && !song) return <ScreenContainer centered><Text style={[styles.error, { color: colors.muted }]}>Skladba nebyla nalezena.</Text></ScreenContainer>;
+  if (songId && !song) return <ScreenContainer className="p-6 justify-center"><Text style={[styles.error, { color: colors.muted }]}>Skladba nebyla nalezena.</Text></ScreenContainer>;
 
   const save = async () => {
     if (!form.title.trim()) { Alert.alert("Chybí název skladby", "Zadej název, pod kterým chceš skladbu vést v katalogu."); return; }

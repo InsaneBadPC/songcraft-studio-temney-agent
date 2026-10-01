@@ -82,7 +82,7 @@ export default function SettingsScreen() {
   };
 
   if (loading || (isAuthenticated && snapshot.isLoading)) return <ScreenContainer><LoadingState /></ScreenContainer>;
-  if (!isAuthenticated) return <ScreenContainer centered><EmptyState icon="lock" title="Připoj své studio" text="Přihlášení vytváří soukromé úložiště pro tvé texty, přebaly a MP3." action={<Pressable onPress={() => void startPrivateLogin()} style={[styles.login, { backgroundColor: colors.primary }]}><Text style={styles.loginText}>Přihlásit se</Text></Pressable>} /></ScreenContainer>;
+  if (!isAuthenticated) return <ScreenContainer className="p-5 justify-center"><EmptyState icon="lock" title="Připoj své studio" text="Přihlášení vytváří soukromé úložiště pro tvé texty, přebaly a MP3." action={<Pressable onPress={() => void startPrivateLogin()} style={[styles.login, { backgroundColor: colors.primary }]}><Text style={styles.loginText}>Přihlásit se</Text></Pressable>} /></ScreenContainer>;
 
   const albums = snapshot.data?.albums ?? [];
   const versions = snapshot.data?.versions.length ?? 0;
@@ -102,7 +102,7 @@ export default function SettingsScreen() {
     }
   };
 
-  return <ScreenContainer inset><ScrollView contentContainerStyle={styles.content}><StudioHeader eyebrow="Osobní pracovní prostor" title="Nastavení" />
+  return <ScreenContainer className="px-5"><ScrollView contentContainerStyle={styles.content}><StudioHeader eyebrow="Osobní pracovní prostor" title="Nastavení" />
     <View style={[styles.profile, { backgroundColor: colors.surface, borderColor: colors.border }]}><View style={[styles.avatar, { backgroundColor: `${colors.primary}26` }]}><Text style={[styles.avatarText, { color: colors.primary }]}>{(user?.name ?? "S").slice(0, 1).toUpperCase()}</Text></View><View style={styles.profileCopy}><Text style={[styles.profileName, { color: colors.foreground }]}>{user?.name ?? "SongCraft autor"}</Text><Text numberOfLines={1} style={[styles.profileMail, { color: colors.muted }]}>{user?.email ?? "Soukromý cloudový účet"}</Text></View><MaterialIcons name="verified-user" size={22} color={colors.success} /></View>
     <SectionTitle title="Synchronizace" /><View style={[styles.syncCard, { backgroundColor: `${colors.success}15`, borderColor: `${colors.success}55` }]}><MaterialIcons name="cloud-done" size={25} color={colors.success} /><View style={styles.syncCopy}><Text style={[styles.syncTitle, { color: colors.foreground }]}>Cloudové studio je propojeno</Text><Text style={[styles.syncText, { color: colors.muted }]}>Obsah se načítá z tvého zabezpečeného prostoru. Soubory zůstávají oddělené od katalogu.</Text></View></View>
     <View style={styles.statRow}><Stat value={albums.length} label="alb" /><Stat value={snapshot.data?.documents.length ?? 0} label="textů" /><Stat value={versions} label="MP3 verzí" /></View>

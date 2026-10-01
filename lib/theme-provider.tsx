@@ -1,4 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
+import { View } from "react-native";
+import { colorScheme as nativewindColorScheme, vars } from "nativewind";
 
 import { SchemeColors, type ColorScheme } from "@/constants/theme";
 
@@ -14,6 +16,7 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
   const [colorScheme, setColorSchemeState] = useState<ColorScheme>("dark");
 
   const applyScheme = useCallback((scheme: ColorScheme) => {
+    nativewindColorScheme.set(scheme);
     if (typeof document !== "undefined") {
       const root = document.documentElement;
       root.dataset.theme = scheme;
@@ -36,6 +39,16 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
     applyScheme(colorScheme);
   }, [applyScheme, colorScheme]);
 
+  // Všechny tokeny, ne jen 9 - jinak jsou třídy jako bg-accent tiše prázdné.
+  const themeVariables = useMemo(() => {
+    const palette = SchemeColors[colorScheme];
+    const flat: Record<string, string> = {};
+    Object.entries(palette).forEach(([token, value]) => {
+      flat[`color-${token}`] = value;
+    });
+    return vars(flat);
+  }, [colorScheme]);
+
   const value = useMemo(
     () => ({
       colorScheme,
@@ -44,7 +57,11 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
     [colorScheme, setColorScheme],
   );
 
-  return <ThemeContext.Provider value={value}>{children}</ThemeContext.Provider>;
+  return (
+    <ThemeContext.Provider value={value}>
+      <View style={[{ flex: 1 }, themeVariables]}>{children}</View>
+    </ThemeContext.Provider>
+  );
 }
 
 export function useThemeContext(): ThemeContextValue {

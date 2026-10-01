@@ -41,7 +41,7 @@ export default function AuthScreen() {
   };
 
   return (
-    <ScreenContainer centered>
+    <ScreenContainer className="p-5 justify-center">
       <View style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.border }]}>
         <View style={[styles.icon, { backgroundColor: `${colors.primary}25` }]}>
           <MaterialIcons name="lock-person" size={29} color={colors.primary} />

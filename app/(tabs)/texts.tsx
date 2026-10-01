@@ -64,12 +64,12 @@ export default function TextsScreen() {
   }), [albumId, search, statusFilter, phaseFilter, allDocuments, snapshot.data?.songs, snapshot.data?.versions]);
 
   if (loading || (isAuthenticated && snapshot.isLoading)) {
-    return <ScreenContainer inset><View style={{ paddingTop: 14, gap: 12 }}><Shimmer height={36} radius={16} /><Shimmer height={48} radius={16} /><View style={{ gap: 10, marginTop: 12 }}>{[1,2,3].map(i=> <View key={i} style={[styles.row, { backgroundColor: colors.surface, borderColor: colors.border }]}><Shimmer width={60} height={60} radius={16} /><View style={{ flex:1, gap:8 }}><Shimmer height={14} width="60%" /><Shimmer height={12} width="80%" /></View></View>)}</View></View></ScreenContainer>;
+    return <ScreenContainer className="px-5"><View style={{ paddingTop: 14, gap: 12 }}><Shimmer height={36} radius={16} /><Shimmer height={48} radius={16} /><View style={{ gap: 10, marginTop: 12 }}>{[1,2,3].map(i=> <View key={i} style={[styles.row, { backgroundColor: colors.surface, borderColor: colors.border }]}><Shimmer width={60} height={60} radius={16} /><View style={{ flex:1, gap:8 }}><Shimmer height={14} width="60%" /><Shimmer height={12} width="80%" /></View></View>)}</View></View></ScreenContainer>;
   }
-  if (!isAuthenticated) return <ScreenContainer centered><EmptyState icon="lock" title="Přihlášení je potřeba" text="Texty se ukládají do soukromého cloudového prostoru." action={<Pressable onPress={() => void startPrivateLogin()} style={[styles.login, { backgroundColor: colors.primary }]}><Text style={styles.loginText}>Přihlásit se</Text></Pressable>} /></ScreenContainer>;
+  if (!isAuthenticated) return <ScreenContainer className="p-5 justify-center"><EmptyState icon="lock" title="Přihlášení je potřeba" text="Texty se ukládají do soukromého cloudového prostoru." action={<Pressable onPress={() => void startPrivateLogin()} style={[styles.login, { backgroundColor: colors.primary }]}><Text style={styles.loginText}>Přihlásit se</Text></Pressable>} /></ScreenContainer>;
 
   return (
-    <ScreenContainer inset>
+    <ScreenContainer className="px-5">
       <Animated.FlatList
         data={records}
         keyExtractor={(item) => String(item.id)}

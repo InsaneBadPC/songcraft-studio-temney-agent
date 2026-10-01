@@ -37,7 +37,7 @@ export default function SongDetailScreen() {
   const sortedVersions = useMemo(() => [...versions].sort((left, right) => versionOrder === "rating" ? right.rating - left.rating || Number(right.isFinal) - Number(left.isFinal) || Number(right.isPrimary) - Number(left.isPrimary) || right.createdAt.getTime() - left.createdAt.getTime() : right.createdAt.getTime() - left.createdAt.getTime()), [versionOrder, versions]);
 
   if (snapshot.isLoading) return <ScreenContainer><LoadingState label="Načítám skladbu…" /></ScreenContainer>;
-  if (!song) return <ScreenContainer centered><EmptyState icon="music-off" title="Skladba nebyla nalezena" text="Vrať se do knihovny a zkus otevřít položku znovu." action={<PrimaryButton label="Do knihovny" icon="library-music" onPress={() => router.replace("/(tabs)/library" as never)} />} /></ScreenContainer>;
+  if (!song) return <ScreenContainer className="p-5 justify-center"><EmptyState icon="music-off" title="Skladba nebyla nalezena" text="Vrať se do knihovny a zkus otevřít položku znovu." action={<PrimaryButton label="Do knihovny" icon="library-music" onPress={() => router.replace("/(tabs)/library" as never)} />} /></ScreenContainer>;
   const songContent = { stylePrompt: song.stylePrompt ?? legacyDocument?.stylePrompt ?? "", lyrics: song.lyrics ?? legacyDocument?.lyrics ?? "", coverUrl: song.coverUrl ?? legacyDocument?.coverUrl ?? album?.coverUrl };
 
   const copyText = async (content: string, label: string) => {
