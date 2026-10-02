@@ -1,9 +1,8 @@
 import MaterialIcons from "@expo/vector-icons/MaterialIcons";
 import { Image } from "expo-image";
-import { useMemo, useRef } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
-  Alert,
   Animated,
   Modal,
   PanResponder,
@@ -124,10 +123,17 @@ export function SongMediaGallery({
   );
 }
 
+/** Kolik posune dlaždička, když se posune o jedno místo v řadě. */
+const STEP = TILE + GAP;
+/** Pod tuto vzdálenost považujeme dotyk za kliknutí, ne za tah. */
+const DEAD_ZONE = 8;
+
 /**
- * Mřížka s přetahováním. Řádky po třech; položka se zvedne a po přesunu
- * nad sousední se místo vymění. Bez externí knihovny - PanResponder z
- * React Native stačí a nepřidává závislost.
+ * Mřížka s přetahováním prstem.
+ *
+ * Tah nese stav grid, ne dlaždičky: když uživatel táhne, dlaždička, kterou
+ * bere, letí s prstem a ty mezi ní a cílem se odsunou, aby viděl kam
+ * přijde. Po puštění se pořadí uloží. Tap bez tahu (pod DEAD_ZONE) maže.
  */
 function ReorderableGrid({
   items,
@@ -138,128 +144,188 @@ function ReorderableGrid({
   onReorder: (orderedIds: string[]) => void;
   onRemove: (id: string) => void;
 }) {
-  const rows = useMemo(() => {
-    const out: SongMediaItem[][] = [];
-    for (let i = 0; i < items.length; i += 3) out.push(items.slice(i, i + 3));
-    return out;
-  }, [items]);
+  const dragX = useRef(new Animated.Value(0)).current;
+  const [from, setFrom] = useState<number | null>(null);
+  const [to, setTo] = useState<number | null>(null);
+
+  const finish = useCallback(
+    (moved: boolean) => {
+      if (moved && from !== null && to !== null && from !== to) {
+        onReorder(moveMedia(items, from, to));
+      }
+      dragX.setValue(0);
+      setFrom(null);
+      setTo(null);
+    },
+    [from, to, items, onReorder, dragX],
+  );
 
   return (
     <View style={styles.rows}>
-      {rows.map((row, rowIndex) => (
-        <View key={`row-${rowIndex}`} style={styles.row}>
-          {row.map((item) => (
-            <DraggableTile
-              key={item.id}
-              item={item}
-              siblings={items}
-              onReorder={onReorder}
-              onRemove={onRemove}
-            />
-          ))}
-        </View>
+      {items.map((item, index) => (
+        <DraggableTile
+          key={item.id}
+          item={item}
+          index={index}
+          total={items.length}
+          dragX={dragX}
+          dragging={from === index}
+          // kam dlaždička ustoupí, když se beru jina a posune se za ni
+          shiftFor={from === null || to === null ? 0 : shiftOf(index, from, to)}
+          onPickUp={() => {
+            setFrom(index);
+            setTo(index);
+          }}
+          onDragMove={(dx) => {
+            dragX.setValue(dx);
+            const next = clamp(index + Math.round(dx / STEP), 0, items.length - 1);
+            setTo(next);
+          }}
+          onRelease={finish}
+          onRemove={onRemove}
+        />
       ))}
     </View>
   );
 }
 
+/**
+ * Odsun pro dlaždičku, která se nepohybuje, ale uvolní místo táhnuté.
+ * Při tahu doprava (to > from) se posunou ty mezi nimi doleva.
+ */
+function shiftOf(index: number, from: number, to: number): number {
+  if (from === to) return 0;
+  if (to > from && index > from && index <= to) return -STEP;
+  if (to < from && index >= to && index < from) return STEP;
+  return 0;
+}
+
+function clamp(value: number, min: number, max: number) {
+  return Math.max(min, Math.min(max, value));
+}
+
 function DraggableTile({
   item,
-  siblings,
-  onReorder,
+  index,
+  total,
+  dragX,
+  dragging,
+  shiftFor,
+  onPickUp,
+  onDragMove,
+  onRelease,
   onRemove,
 }: {
   item: SongMediaItem;
-  siblings: SongMediaItem[];
-  onReorder: (orderedIds: string[]) => void;
+  index: number;
+  total: number;
+  dragX: Animated.Value;
+  dragging: boolean;
+  shiftFor: number;
+  onPickUp: () => void;
+  onDragMove: (dx: number) => void;
+  onRelease: (moved: boolean) => void;
   onRemove: (id: string) => void;
 }) {
   const colors = useColors();
   const lift = useRef(new Animated.Value(0)).current;
-  const dragging = useRef(false);
-  const startX = useRef(0);
+  const settle = useRef(new Animated.Value(shiftFor)).current;
+  const travelled = useRef(0);
 
-  const confirmRemove = () => {
-    Alert.alert("Odebrat toto médium?", item.originalFileName || "Soubor zůstane v paměti telefonu, ale nebude ve videu.", [
-      { text: "Zrušit", style: "cancel" },
-      { text: "Odebrat", style: "destructive", onPress: () => onRemove(item.id) },
-    ]);
-  };
+  useEffect(() => {
+    Animated.spring(settle, { toValue: shiftFor, useNativeDriver: false, friction: 8 }).start();
+  }, [settle, shiftFor]);
+
+  const confirmRemove = useCallback(() => {
+    onRemove(item.id);
+  }, [onRemove, item.id]);
 
   const pan = useMemo(
     () =>
       PanResponder.create({
         onStartShouldSetPanResponder: () => true,
-        onMoveShouldSetPanResponder: (_e, g) => Math.abs(g.dx) > 6 || Math.abs(g.dy) > 6,
+        onMoveShouldSetPanResponder: () => true,
         onPanResponderGrant: () => {
-          dragging.current = true;
-          startX.current = Date.now();
-          Animated.spring(lift, { toValue: 1, useNativeDriver: true, friction: 7 }).start();
+          travelled.current = 0;
+          onPickUp();
+          // Stín a elevation native driver nezvládne, proto JS driver.
+          Animated.spring(lift, { toValue: 1, useNativeDriver: false, friction: 7 }).start();
         },
-        onPanResponderRelease: (_e, g) => {
-          Animated.spring(lift, { toValue: 0, useNativeDriver: true, friction: 7 }).start();
-          // Krátký dotyk bez posunu = otevřít nabídku smazání.
-          const moved = Math.abs(g.dx) + Math.abs(g.dy);
-          if (!dragging.current || (moved < 8 && Date.now() - startX.current < 400)) {
-            confirmRemove();
-          }
-          dragging.current = false;
+        onPanResponderMove: (_e, g) => {
+          travelled.current = Math.abs(g.dx);
+          onDragMove(g.dx);
+        },
+        onPanResponderRelease: () => {
+          Animated.spring(lift, { toValue: 0, useNativeDriver: false, friction: 7 }).start();
+          onRelease(travelled.current >= DEAD_ZONE);
+        },
+        onPanResponderTerminate: () => {
+          Animated.spring(lift, { toValue: 0, useNativeDriver: false, friction: 7 }).start();
+          onRelease(false);
         },
       }),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [item.id],
+    [lift, onPickUp, onDragMove, onRelease],
   );
-
-  const shift = siblings.findIndex((s) => s.id === item.id);
 
   return (
     <Animated.View
       {...pan.panHandlers}
       accessibilityRole="button"
-      accessibilityLabel={`${item.kind === "video" ? "Video" : "Obrázek"} ${shift + 1} z ${siblings.length}`}
+      accessibilityLabel={
+        dragging
+          ? `Přesouváš ${item.kind === "video" ? "video" : "obrázek"} ${index + 1} z ${total}`
+          : `${item.kind === "video" ? "Video" : "Obrázek"} ${index + 1} z ${total}. Přetáhni pro změnu pořadí, klepni pro smazání.`
+      }
       style={[
         styles.tile,
         {
-          borderColor: Hairline,
+          borderColor: dragging ? colors.primary : Hairline,
           backgroundColor: colors.surface,
+          zIndex: dragging ? 20 : 1,
           transform: [
-            { scale: lift.interpolate({ inputRange: [0, 1], outputRange: [1, 1.08] }) },
-            { translateY: lift.interpolate({ inputRange: [0, 1], outputRange: [0, -4] }) },
+            { translateX: dragging ? dragX : settle },
+            { scale: lift.interpolate({ inputRange: [0, 1], outputRange: [1, 1.12] }) },
+            { translateY: lift.interpolate({ inputRange: [0, 1], outputRange: [0, -8] }) },
           ],
-          zIndex: lift.interpolate({ inputRange: [0, 1], outputRange: [0, 20] }),
+          shadowColor: "#000000",
+          shadowOpacity: lift.interpolate({ inputRange: [0, 1], outputRange: [0.18, 0.45] }),
+          shadowRadius: lift.interpolate({ inputRange: [0, 1], outputRange: [8, 22] }),
+          shadowOffset: { width: 0, height: 6 },
+          elevation: lift.interpolate({ inputRange: [0, 1], outputRange: [2, 16] }),
         },
       ]}
     >
       {item.url ? (
-        <Image
-          source={{ uri: item.url }}
-          style={styles.thumb}
-          contentFit="cover"
-          transition={120}
-        />
+        <Image source={{ uri: item.url }} style={styles.thumb} contentFit="cover" transition={120} />
       ) : (
         <View style={[styles.thumb, { backgroundColor: colors.surfaceElevated }]}>
           <MaterialIcons name="image-not-supported" size={20} color={colors.mutedSubtle} />
         </View>
       )}
 
-      <View style={styles.badge}>
+      <View style={[styles.badge, dragging ? { backgroundColor: colors.primary } : null]}>
         <MaterialIcons
           name={item.kind === "video" ? "videocam" : "photo-camera"}
           size={12}
-          color={colors.onPrimary}
+          color={dragging ? colors.onPrimary : "#FFFFFF"}
         />
       </View>
-      <View style={styles.orderBadge}>
-        <Text style={[Type.caption, { color: colors.foreground }]}>{shift + 1}</Text>
+      <View style={[styles.orderBadge, dragging ? { backgroundColor: colors.primary } : null]}>
+        <Text style={[Type.caption, { color: dragging ? colors.onPrimary : colors.foreground }]}>
+          {index + 1}
+        </Text>
       </View>
 
       <Pressable
         accessibilityRole="button"
         accessibilityLabel={`Odebrat ${item.originalFileName || "médium"}`}
         onPress={confirmRemove}
-        hitSlop={8}
-        style={({ pressed }) => [styles.remove, { backgroundColor: colors.scrim, opacity: pressed ? 0.7 : 1 }]}
+        hitSlop={6}
+        disabled={dragging}
+        style={({ pressed }) => [
+          styles.remove,
+          { backgroundColor: colors.scrim, opacity: pressed || dragging ? 0.5 : 1 },
+        ]}
       >
         <MaterialIcons name="close" size={14} color="#FFFFFF" />
       </Pressable>
@@ -297,8 +363,7 @@ const styles = StyleSheet.create({
   subtitle: { lineHeight: 15 },
   close: { width: 38, height: 38, borderRadius: Radius.md, alignItems: "center", justifyContent: "center" },
   content: { paddingHorizontal: Space.xl, paddingBottom: Space.lg, gap: Space.md },
-  rows: { gap: GAP },
-  row: { flexDirection: "row", gap: GAP },
+  rows: { flexDirection: "row", flexWrap: "wrap", gap: GAP },
   tile: {
     width: TILE,
     height: TILE,
