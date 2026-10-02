@@ -306,11 +306,18 @@ export type ExternalYoutubeVideo =
 
 export const YOUTUBE_EFFECTS = ["static", "zoom", "wave", "zoom_wave", "blur"] as const;
 export type YoutubeEffect = (typeof YOUTUBE_EFFECTS)[number];
-export const EXTERNAL_VIDEO_MODES = ["static_cover", "image_animation", "full_scenes"] as const;
+export const EXTERNAL_VIDEO_MODES = ["static_cover", "image_animation", "full_scenes", "source_gallery"] as const;
 export type ExternalVideoMode = (typeof EXTERNAL_VIDEO_MODES)[number];
 
-export async function createExternalYoutubeVideo(songId: string, versionId: string, effect: YoutubeEffect = "zoom_wave", mode?: ExternalVideoMode) {
-  const { data, error } = await supabase.functions.invoke("songcraft-youtube", { body: { action: "create", songId, versionId, effect, ...(mode ? { mode } : {}) } });
+export type GalleryKind = "image" | "video";
+
+export async function createExternalYoutubeVideo(
+  songId: string, versionId: string, effect: YoutubeEffect = "zoom_wave",
+  mode?: ExternalVideoMode, galleryKind?: GalleryKind | null,
+) {
+  const { data, error } = await supabase.functions.invoke("songcraft-youtube", {
+    body: { action: "create", songId, versionId, effect, ...(mode ? { mode } : {}), ...(galleryKind ? { galleryKind } : {}) },
+  });
   return assert(data, error) as ExternalYoutubeVideo;
 }
 
@@ -450,4 +457,111 @@ export type YoutubeCopyAction = "description" | "tags";
 export async function generateExternalYoutubeText(action: YoutubeCopyAction, songId: string) {
   const { data, error } = await supabase.functions.invoke("songcraft-copywriter", { body: { action, songId } });
   return assert(data, error) as { text: string };
+}
+
+// ---------------------------------------------------------------------------
+// Doprovodna media piskne (sc_song_media).
+//
+// Umoznuje vic obrazku nebo videi, nez umi dnes jediny cover_path a
+// jediny source_video_path. Poradi urcuje uzivatel rucne, takze se to
+// nehradi v tomto souboru - ulozi se cca uzivatelem poslanou.
+// ---------------------------------------------------------------------------
+
+export type SongMediaKind = "image" | "video";
+
+export interface SongMediaItem {
+  id: string;
+  songId: string;
+  kind: SongMediaKind;
+  storageKey: string;
+  url: string | null;
+  originalFileName: string | null;
+  mimeType: string | null;
+  byteSize: number;
+  sortOrder: number;
+  sceneMs: number;
+}
+
+export async function listExternalSongMedia(songId: string): Promise<SongMediaItem[]> {
+  const user = await owner();
+  const { data, error } = await supabase
+    .from("sc_song_media")
+    .select("id,song_id,kind,storage_path,original_file_name,mime_type,byte_size,sort_order,scene_ms")
+    .eq("song_id", songId)
+    .eq("user_id", user.id)
+    .order("sort_order", { ascending: true })
+    .order("created_at", { ascending: true });
+  const rows = assert(data ?? [], error as never);
+  return Promise.all(
+    rows.map(async (row: any) => ({
+      id: row.id as string,
+      songId: row.song_id as string,
+      kind: (row.kind as SongMediaKind) ?? "image",
+      storageKey: row.storage_path as string,
+      url: await signedUrl(row.storage_path, user.id),
+      originalFileName: (row.original_file_name as string) ?? null,
+      mimeType: (row.mime_type as string) ?? null,
+      byteSize: Number(row.byte_size ?? 0),
+      sortOrder: Number(row.sort_order ?? 0),
+      sceneMs: Number(row.scene_ms ?? 0),
+    })),
+  );
+}
+
+export async function addExternalSongMedia(input: {
+  songId: string;
+  kind: SongMediaKind;
+  storageKey: string;
+  originalFileName?: string | null;
+  mimeType?: string | null;
+  byteSize?: number;
+}) {
+  const user = await owner();
+  const storagePath = ownedOptionalPath(user.id, input.storageKey);
+  if (!storagePath) throw new Error("Soubor se nepodarilo nahrat.");
+  // Novy soubor jde na konec - poradi pak rozhodne uzivatel pretahovanim.
+  const { data: last } = await supabase
+    .from("sc_song_media")
+    .select("sort_order")
+    .eq("song_id", input.songId)
+    .eq("user_id", user.id)
+    .order("sort_order", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  const sortOrder = Number((last as any)?.sort_order ?? -1) + 1;
+  const { data, error } = await supabase
+    .from("sc_song_media")
+    .insert({
+      user_id: user.id,
+      song_id: input.songId,
+      kind: input.kind,
+      storage_path: storagePath,
+      original_file_name: input.originalFileName ?? null,
+      mime_type: input.mimeType ?? null,
+      byte_size: Math.max(0, Math.trunc(input.byteSize ?? 0)),
+      sort_order: sortOrder,
+    })
+    .select("id")
+    .single();
+  return assert(data, error).id as string;
+}
+
+export async function removeExternalSongMedia(id: string) {
+  const user = await owner();
+  const { error } = await supabase.from("sc_song_media").delete().eq("id", id).eq("user_id", user.id);
+  if (error) throw new Error(error.message);
+}
+
+/** Poradi podle toho, v jakem poradi uzivatel poslal idcka. */
+export async function reorderExternalSongMedia(songId: string, orderedIds: string[]) {
+  const user = await owner();
+  for (let i = 0; i < orderedIds.length; i++) {
+    const { error } = await supabase
+      .from("sc_song_media")
+      .update({ sort_order: i })
+      .eq("id", orderedIds[i])
+      .eq("song_id", songId)
+      .eq("user_id", user.id);
+    if (error) throw new Error(error.message);
+  }
 }

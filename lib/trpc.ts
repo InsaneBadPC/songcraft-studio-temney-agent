@@ -6,42 +6,7 @@ import { normalizeOptionalId } from "@/lib/client-input";
 import { clearUserClientData } from "@/lib/client-session-cleanup";
 import { studioSnapshotQueryKey } from "@/lib/query-keys";
 
-import {
-  callExternalMediaFunction,
-  checkExternalCoverGeneration,
-  checkExternalYoutubeVideo,
-  completeExternalDocument,
-  createExternalAlbum,
-  createExternalCoverGeneration,
-  createExternalYoutubeVideo,
-  createExternalDocument,
-  createExternalRhymeWord,
-  createExternalSong,
-  createExternalStylePrompt,
-  createExternalVersion,
-  deleteExternalRhymeWord,
-  deleteExternalStylePrompt,
-  deleteExternalVersion,
-  exportExternalLibrary,
-  exportExternalLyricsTxt,
-  exportExternalTaggedCopy,
-  generateExternalYoutubeText,
-  getExternalStudioSnapshot,
-  importExternalDocx,
-  importExternalPdf,
-  importExternalGoogleDocument,
-  setExternalFinalVersion,
-  setExternalPrimaryVersion,
-  updateExternalAlbum,
-  updateExternalDocument,
-  updateExternalSong,
-  updateExternalStylePrompt,
-  updateExternalVersion,
-  uploadToExternalStorage,
-  type ExternalVideoMode,
-  type YoutubeCopyAction,
-  type YoutubeEffect,
-} from "@/lib/external-studio";
+import { addExternalSongMedia, callExternalMediaFunction, checkExternalCoverGeneration, checkExternalYoutubeVideo, completeExternalDocument, createExternalAlbum, createExternalCoverGeneration, createExternalDocument, createExternalRhymeWord, createExternalSong, createExternalStylePrompt, createExternalVersion, createExternalYoutubeVideo, deleteExternalRhymeWord, deleteExternalStylePrompt, deleteExternalVersion, exportExternalLibrary, exportExternalLyricsTxt, exportExternalTaggedCopy, generateExternalYoutubeText, getExternalStudioSnapshot, importExternalDocx, importExternalGoogleDocument, importExternalPdf, removeExternalSongMedia, reorderExternalSongMedia, setExternalFinalVersion, setExternalPrimaryVersion, type ExternalVideoMode, type YoutubeCopyAction, type YoutubeEffect, updateExternalAlbum, updateExternalDocument, updateExternalSong, updateExternalStylePrompt, updateExternalVersion, uploadToExternalStorage } from "@/lib/external-studio";
 import { supabase } from "@/lib/supabase";
 
 const unavailable = async (_input?: unknown) => { throw new Error("Tato externí operace se právě dokončuje. Zkus ji znovu za okamžik."); };
@@ -109,6 +74,10 @@ export const trpc = {
     createSong: { useMutation: () => useMutation({ mutationFn: (input: { title: string; albumId?: string | number | null; stylePrompt?: string | null; stylePrompts?: string[]; lyrics?: string | null; notes?: string | null; coverStorageKey?: string | null; coverUrl?: string | null }) => createExternalSong({ ...input, albumId: input.albumId === null || input.albumId === undefined ? null : String(input.albumId) }) }) },
     updateSong: { useMutation: () => useMutation({ mutationFn: (input: { id: string | number; title?: string; albumId?: string | number | null; stylePrompt?: string | null; stylePrompts?: string[]; lyrics?: string | null; notes?: string | null; coverStorageKey?: string | null; coverUrl?: string | null; youtubeDescription?: string | null; youtubeTags?: string | null }) => updateExternalSong({ ...input, id: String(input.id), albumId: normalizeOptionalId(input.albumId) }) }) },
     upload: { useMutation: () => useMutation({ mutationFn: uploadToExternalStorage }) },
+    // --- Doprovodna media piskne (vice obrazku / videi pro video) ---
+    addSongMedia: { useMutation: () => useMutation({ mutationFn: (input: { songId: string | number; kind: "image" | "video"; storageKey: string; originalFileName?: string | null; mimeType?: string | null; byteSize?: number }) => addExternalSongMedia({ ...input, songId: String(input.songId) }) }) },
+    removeSongMedia: { useMutation: () => useMutation({ mutationFn: ({ id }: { id: string | number }) => removeExternalSongMedia(String(id)) }) },
+    reorderSongMedia: { useMutation: () => useMutation({ mutationFn: ({ songId, orderedIds }: { songId: string | number; orderedIds: string[] }) => reorderExternalSongMedia(String(songId), orderedIds) }) },
     createVersion: { useMutation: () => useMutation({ mutationFn: (input: { songId: string | number; label: string; originalFileName: string; storageKey: string; storageUrl?: string; mimeType: string; byteSize: number; rating?: number; isPrimary?: boolean; id3Title?: string | null; id3Artist?: string | null; id3Album?: string | null; id3TrackNumber?: string | null; id3Year?: string | null; id3Genre?: string | null; id3Comment?: string | null }) => createExternalVersion({ ...input, songId: String(input.songId) }) }) },
     updateVersion: { useMutation: () => useMutation({ mutationFn: (input: { id: string | number; label?: string; rating?: number; id3Title?: string | null; id3Artist?: string | null; id3Album?: string | null; id3TrackNumber?: string | null; id3Year?: string | null; id3Genre?: string | null; id3Comment?: string | null }) => updateExternalVersion({ ...input, id: String(input.id) }) }) },
     setPrimaryVersion: { useMutation: () => useMutation({ mutationFn: ({ id }: { id: string | number }) => setExternalPrimaryVersion(String(id)) }) },
@@ -120,7 +89,7 @@ export const trpc = {
     exportLyricsTxt: { useMutation: () => useMutation({ mutationFn: () => exportExternalLyricsTxt() }) },
     createCoverGeneration: { useMutation: () => useMutation({ mutationFn: ({ entityType, entityId, format, userNote }: { entityType: "song" | "lyric" | "album"; entityId: string | number; format?: "youtube_16_9"; userNote?: string | null }) => createExternalCoverGeneration(entityType, String(entityId), { format, userNote }) }) },
     checkCoverGeneration: { useMutation: () => useMutation({ mutationFn: ({ entityType, entityId, jobId, format }: { entityType: "song" | "lyric" | "album"; entityId: string | number; jobId: string; format?: "youtube_16_9" }) => checkExternalCoverGeneration(entityType, String(entityId), jobId, { format }) }) },
-    createYoutubeVideo: { useMutation: () => useMutation({ mutationFn: ({ songId, versionId, effect, mode }: { songId: string | number; versionId: string | number; effect?: YoutubeEffect; mode?: ExternalVideoMode }) => createExternalYoutubeVideo(String(songId), String(versionId), effect, mode) }) },
+    createYoutubeVideo: { useMutation: () => useMutation({ mutationFn: ({ songId, versionId, effect, mode, galleryKind }: { songId: string | number; versionId: string | number; effect?: YoutubeEffect; mode?: ExternalVideoMode; galleryKind?: "image" | "video" | null }) => createExternalYoutubeVideo(String(songId), String(versionId), effect, mode, galleryKind) }) },
     checkYoutubeVideo: { useMutation: () => useMutation({ mutationFn: ({ songId, versionId, jobId }: { songId: string | number; versionId: string | number; jobId: string }) => checkExternalYoutubeVideo(String(songId), String(versionId), jobId) }) },
     createStylePrompt: { useMutation: () => useMutation({ mutationFn: (input: { content: string; note?: string | null; rating?: number }) => createExternalStylePrompt(input).then(() => undefined) }) },
     updateStylePrompt: { useMutation: () => useMutation({ mutationFn: (input: { id: string | number; content?: string; note?: string | null; rating?: number }) => updateExternalStylePrompt({ ...input, id: String(input.id) }) }) },

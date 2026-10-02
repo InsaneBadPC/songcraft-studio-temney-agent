@@ -31,6 +31,7 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import path from "node:path";
 import { buildLoopVideo } from "./loop-engine.mjs";
+import { buildGalleryVideo } from "./gallery-engine.mjs";
 
 const exec = promisify(execFile);
 const url = process.env.SUPABASE_URL;
@@ -322,6 +323,8 @@ async function processJob(job) {
     const type = job.mode || job.type || "static_cover";
     // source_loop si bere video, nebo obal když video není, a obal nepotřebuje
     // stahovat dopředu.
+    // source_gallery potřebuje obál vždy (začátek a konec), jen source_loop si ho
+    // stáhne až když není video.
     const needsArtwork = type !== "source_loop";
     let artwork = null;
     await download(await signed(audioStoragePath), audio);
@@ -335,7 +338,48 @@ async function processJob(job) {
       await rm(artworkRaw, { force: true });
     }
 
-    if (type === "source_loop") {
+    if (type === "source_gallery") {
+      // === větev E: skládání z více obrázků / videí jedné písně ===
+      // [obál 5 s] -> [scéna 8 s] -> ... -> [obál 5 s]. Pořadí je to, co
+      // uživatel poskládal tážením v panelu, a opakuje se, dokud hraje hudba.
+      const { data: rows, error: mediaError } = await request(
+        api("sc_song_media",
+          `?select=id,kind,storage_path,scene_ms&song_id=eq.${encodeURIComponent(job.song_id)}`
+          + `&user_id=eq.${encodeURIComponent(job.user_id)}&order=sort_order.asc`),
+      );
+      if (mediaError) throw new Error(`media se nenačetla: ${mediaError.message}`);
+      const wanted = job.galleryKind === "video" ? "video" : job.galleryKind === "image" ? "image" : null;
+      const useRows = wanted ? (rows || []).filter((r) => r.kind === wanted) : (rows || []);
+      if (!useRows.length) {
+        throw new Error(
+          wanted === "video"
+            ? "K této skladbě nejsou nahrána žádná doprovodná videa."
+            : "K této skladbě nejsou nahrány žádné doprovodné obrázky.",
+        );
+      }
+      const scenes = [];
+      for (let i = 0; i < useRows.length; i += 1) {
+        const row = useRows[i];
+        const ext = path.extname(row.storage_path || "") || (row.kind === "video" ? ".mp4" : ".jpg");
+        const target = path.join(work, `media${String(i).padStart(3, "0")}${ext}`);
+        await download(await signed(ownedPath(job.user_id, row.storage_path)), target);
+        scenes.push({ kind: row.kind === "video" ? "video" : "image", path: target, sceneMs: Number(row.scene_ms || 0) });
+      }
+      if (!artwork) {
+        const coverRaw = path.join(work, "gallerycover.raw");
+        await download(await signed(coverStoragePath), coverRaw);
+        const cover = path.join(work, `gallerycover.${sniffImageExtension(await readFile(coverRaw))}`);
+        if (cover !== coverRaw) await writeFile(cover, await readFile(coverRaw));
+        await rm(coverRaw, { force: true });
+        const result = await buildGalleryVideo({
+          audio, cover, scenes, out: output,
+          workDir: path.join(work, "gallery"),
+          onProgress: (line) => { console.log(`[${job.id}] ${line}`); void refreshLease(job.id, job.user_id); },
+        });
+        await assertPlayableVideo(output);
+        console.log(`[ready] ${job.id} (source_gallery, ${result.clips} klipů, ${result.duration.toFixed(2)} s)`);
+      }
+    } else if (type === "source_loop") {
       // === větev D2: loop engine (náhrada image_animation a full_scenes) ===
       // Všechno běží lokálním ffmpegem, žádný dashboard, žádné drahé GPU.
       let sourceVideo;

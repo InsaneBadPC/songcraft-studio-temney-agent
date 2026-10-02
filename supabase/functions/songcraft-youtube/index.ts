@@ -43,7 +43,7 @@ Deno.serve(async (request) => {
   if (authError || !user) return json({ error: "Neplatné přihlášení." }, 401);
   if (!isAllowedPrivateUser(user, { allowedUserIds: Deno.env.get("SONGCRAFT_ALLOWED_USER_IDS") ?? undefined, allowedEmails: Deno.env.get("SONGCRAFT_ALLOWED_EMAILS") ?? undefined })) return json({ error: privateAccessMessage() }, 403);
   const admin = createClient(url, serviceKey);
-  const input = await request.json().catch(() => null) as { action?: unknown; songId?: unknown; versionId?: unknown; effect?: unknown; mode?: unknown; jobId?: unknown } | null;
+  const input = await request.json().catch(() => null) as { action?: unknown; songId?: unknown; versionId?: unknown; effect?: unknown; mode?: unknown; galleryKind?: unknown; jobId?: unknown } | null;
 
   if (input?.action === "check") {
     if (typeof input.jobId !== "string" || !uuid.test(input.jobId)) return json({ error: "Neplatné jobId." }, 400);
@@ -76,9 +76,12 @@ Deno.serve(async (request) => {
   }
   if (!audioPath || !coverPath) return json({ error: "Finální MP3 nebo obal nemá platnou cestu vlastníka." }, 409);
 
-  const requestedMode = typeof input.mode === "string" && ["static_cover", "image_animation", "full_scenes"].includes(input.mode) ? input.mode : null;
+  const requestedMode = typeof input.mode === "string" && ["static_cover", "image_animation", "full_scenes", "source_gallery"].includes(input.mode) ? input.mode : null;
   const mode = requestedMode || (effect === "static" ? "static_cover" : "image_animation");
-  const backend = mode === "static_cover" ? "ffmpeg" : mode === "image_animation" ? "vm_image_animation" : "vm_full_scenes";
+  // source_gallery skládá víc obrázků nebo videí jedné písně na VM stejně jako
+  // source_loop - jen si vezme celou galerii místo jednoho zdroje.
+  const backend = mode === "static_cover" ? "ffmpeg" : mode === "source_gallery" ? "vm_source_loop" : mode === "image_animation" ? "vm_image_animation" : "vm_full_scenes";
+  const galleryKind = input.galleryKind === "image" || input.galleryKind === "video" ? input.galleryKind : null;
   const renderPrompt = `SongCraft video mode: ${mode}. Song: ${clip(song.title, 140)}. Style: ${clip(song.style_prompt, 600)}. Lyrics/context: ${clip(song.lyrics, 2_400)}. Legacy effect: ${effect}.`;
   const { data: job, error: createError } = await admin.from("agent_videos").insert({
     user_id: user.id,
@@ -88,6 +91,7 @@ Deno.serve(async (request) => {
     backend,
     audio_storage_path: audioPath,
     prompt_used: renderPrompt,
+    ...(galleryKind ? { gallery_kind: galleryKind } : {}),
     render_status: "queued",
   }).select("id,render_status,mode,backend").single();
   if (createError || !job) return json({ error: "Renderovací úlohu se nepodařilo založit." }, 502);
