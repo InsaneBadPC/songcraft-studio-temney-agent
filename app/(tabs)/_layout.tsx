@@ -67,6 +67,7 @@ export default function TabLayout() {
         <Tabs.Screen name="texts" options={{ title: "Texty", tabBarIcon: ({ color, focused }) => <TabIcon name="square.and.pencil" color={color} focused={focused} /> }} />
         <Tabs.Screen name="albums" options={{ title: "Alba", tabBarIcon: ({ color, focused }) => <TabIcon name="rectangle.stack.fill" color={color} focused={focused} /> }} />
         <Tabs.Screen name="library" options={{ title: "Knihovna", tabBarIcon: ({ color, focused }) => <TabIcon name="music.note.list" color={color} focused={focused} /> }} />
+        <Tabs.Screen name="videos" options={{ title: "Videa", tabBarIcon: ({ color, focused }) => <TabIcon name="film" color={color} focused={focused} /> }} />
         <Tabs.Screen name="assistant" options={{ title: "Temney Agent", tabBarIcon: ({ color, focused }) => <TabIcon name="sparkles" color={color} focused={focused} /> }} />
         <Tabs.Screen name="settings" options={{ title: "Nastavení", tabBarIcon: ({ color, focused }) => <TabIcon name="gearshape.fill" color={color} focused={focused} /> }} />
       </Tabs>

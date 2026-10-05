@@ -19,6 +19,14 @@
  *                      16:9 nebo 9:16. Nahrazuje image_animation a full_scenes, které
  *                      potřebovaly dashboard a nebyly na VM dostupné.
  *
+ * TAB VIDEA (5.10.2026) - čtyři režimy, všechny jen lokálním ffmpegem:
+ *   album_cover_intro → obál alba 3 s → obrázek skladby s efektem → obál alba 3 s
+ *                       efekt: breathe / parallax / steps
+ *   gallery_images    → obál alba 3 s → doprovodné obrázky po 8 s → obál alba 3 s
+ *   gallery_videos    → obál alba 3 s → krátké scény 5-10 s → obál alba 3 s
+ *   gallery_mixed     → obál alba 3 s → obrázky i scény V POŘADÍ Z DB → obál alba 3 s
+ *   Všechny čtyři jdou přes gallery-engine.mjs a backend vm_gallery.
+ *
  * Dashboard (FastAPI, Basic auth z env DASHBOARD_USER/DASHBOARD_PASSWORD) běží NA STEJNÉM
  * Oracle VM jako tento worker ⇒ volá se lokálně 127.0.0.1:8080, bez otevírání portů ven.
  *
@@ -31,7 +39,23 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import path from "node:path";
 import { buildLoopVideo } from "./loop-engine.mjs";
-import { buildGalleryVideo } from "./gallery-engine.mjs";
+import { buildGalleryVideo, buildSongCoverVideo } from "./gallery-engine.mjs";
+
+/**
+ * Režimy tabu Videa a odkud berou scény.
+ *
+ * DRŽÍME ZDE, NE V UI: když se tab a worker neshodnou na názvu režimu, job
+ * skončí jako "Unknown video type" a uživatel uvidí jen chybu. Jedna tabulka
+ * v workeru je druhá polovina `lib/video-modes.ts`, obě popisují to samé.
+ */
+const GALLERY_MODES = {
+  gallery_images: "image",
+  gallery_videos: "video",
+  gallery_mixed: "mixed",
+};
+/** Efekty na obrázku skladby pro album_cover_intro. */
+const CENTER_EFFECTS = ["breathe", "parallax", "steps"];
+const SONG_COVER_MODE = "album_cover_intro";
 
 const exec = promisify(execFile);
 const url = process.env.SUPABASE_URL;
@@ -313,18 +337,22 @@ async function processJob(job) {
     const jobAudio = typeof job.audio_storage_path === "string" && job.audio_storage_path
       ? ownedPath(job.user_id, job.audio_storage_path) : null;
     const audioStoragePath = jobAudio || ownedPath(job.user_id, version.tagged_storage_path || version.original_storage_path || version.storage_path);
-    let coverStoragePath = ownedPath(job.user_id, song.cover_path);
-    if (!coverStoragePath && song.album_id) {
+    const songCoverStoragePath = ownedPath(job.user_id, song.cover_path);
+    let albumCoverStoragePath = null;
+    if (song.album_id) {
       const albums = await request(api("sc_albums", `?select=cover_path&id=eq.${encodeURIComponent(song.album_id)}&user_id=eq.${encodeURIComponent(job.user_id)}`));
-      coverStoragePath = ownedPath(job.user_id, albums?.[0]?.cover_path);
+      albumCoverStoragePath = ownedPath(job.user_id, albums?.[0]?.cover_path);
     }
+    // Tab Videa posílá cover_lead_path = obál alba. Když album obal nemá,
+    // použijeme obál skladby, aby video nikdy neselhalo kvůli chybějícímu obalu.
+    const jobCoverLead = ownedPath(job.user_id, job.cover_lead_path);
+    const coverStoragePath = jobCoverLead || songCoverStoragePath || albumCoverStoragePath;
     const audio = path.join(work, "audio.mp3");
     const output = path.join(work, "render.mp4");
     const type = job.mode || job.type || "static_cover";
     // source_loop si bere video, nebo obal když video není, a obal nepotřebuje
     // stahovat dopředu.
-    // source_gallery potřebuje obál vždy (začátek a konec), jen source_loop si ho
-    // stáhne až když není video.
+    // Režimy tabu Videa potřebují obál (začátek a konec) vždy.
     const needsArtwork = type !== "source_loop";
     let artwork = null;
     await download(await signed(audioStoragePath), audio);
@@ -338,23 +366,62 @@ async function processJob(job) {
       await rm(artworkRaw, { force: true });
     }
 
-    if (type === "source_gallery") {
-      // === větev E: skládání z více obrázků / videí jedné písně ===
-      // [obál 5 s] -> [scéna 8 s] -> ... -> [obál 5 s]. Pořadí je to, co
-      // uživatel poskládal tážením v panelu, a opakuje se, dokud hraje hudba.
+    if (type === SONG_COVER_MODE) {
+      // === album_cover_intro: obál alba, obrázek skladby s efektem, obál alba ===
+      //
+      // [obál alba 3 s] -> [obrázek skladby, dýchání/parallax/kroky] -> [obál alba 3 s]
+      //
+      // artwork je obál (cover_lead_path = obál alba, jinak obál skladby).
+      // songCover je sc_songs.cover_path, to je ta druhá věc.
+      if (!songCoverStoragePath) {
+        throw new Error("K této skladbě není nahrán obrázek skladby.");
+      }
+      const centerRaw = path.join(work, "songcover.raw");
+      await download(await signed(songCoverStoragePath), centerRaw);
+      const songCover = path.join(work, `songcover.${sniffImageExtension(await readFile(centerRaw))}`);
+      if (songCover !== centerRaw) await writeFile(songCover, await readFile(centerRaw));
+      await rm(centerRaw, { force: true });
+      const effect = CENTER_EFFECTS.includes(job.center_effect) ? job.center_effect : "breathe";
+      const result = await buildSongCoverVideo({
+        audio, cover: artwork, songCover, out: output,
+        workDir: path.join(work, "songcover"),
+        effect, seed: String(job.id),
+        onProgress: (line) => { console.log(`[${job.id}] ${line}`); void refreshLease(job.id, job.user_id); },
+      });
+      await assertPlayableVideo(output);
+      console.log(`[ready] ${job.id} (${SONG_COVER_MODE}, ${result.effect}, ${result.duration.toFixed(2)} s)`);
+    } else if (GALLERY_MODES[type]) {
+      // === větev E: skládání z doprovodných médií jedné písně ===
+      //
+      // [obál alba 3 s] -> [scéna 8 s] -> ... -> [obál alba 3 s]
+      //
+      // gallery_images  jen obrázky
+      // gallery_videos  jen krátké scény 5-10 s
+      // gallery_mixed   obrázky i scény V POŘADÍ, JAKÉ JE UŽIVATEL NAŘADIL
+      //
+      // POZOR: dřív tu bylo `if (!artwork)`, což nikdy nenastalo, protože
+      // artwork se stahuje pro každý typ kromě source_loop. Větev byla mrtvý
+      // kód: média se stáhla a zahodila, engine se nezavolal, pak se pokusil
+      // nahrát output, který neexistuje.
+      const mediaFilter = GALLERY_MODES[type];
       const { data: rows, error: mediaError } = await request(
         api("sc_song_media",
           `?select=id,kind,storage_path,scene_ms&song_id=eq.${encodeURIComponent(job.song_id)}`
           + `&user_id=eq.${encodeURIComponent(job.user_id)}&order=sort_order.asc`),
       );
       if (mediaError) throw new Error(`media se nenačetla: ${mediaError.message}`);
-      const wanted = job.galleryKind === "video" ? "video" : job.galleryKind === "image" ? "image" : null;
-      const useRows = wanted ? (rows || []).filter((r) => r.kind === wanted) : (rows || []);
+      // Řád je z DB (sort_order) a engine ho NESMÍ přeházět. Dřívější kód
+      // dělal [...images, ...videos], čímž zahodil pořadí nastavené tážením.
+      const useRows = mediaFilter === "mixed"
+        ? (rows || [])
+        : (rows || []).filter((row) => row.kind === mediaFilter);
       if (!useRows.length) {
         throw new Error(
-          wanted === "video"
+          mediaFilter === "video"
             ? "K této skladbě nejsou nahrána žádná doprovodná videa."
-            : "K této skladbě nejsou nahrány žádné doprovodné obrázky.",
+            : mediaFilter === "image"
+              ? "K této skladbě nejsou nahrány žádné doprovodné obrázky."
+              : "K této skladbě nejsou nahrána žádná doprovodná média.",
         );
       }
       const scenes = [];
@@ -365,20 +432,14 @@ async function processJob(job) {
         await download(await signed(ownedPath(job.user_id, row.storage_path)), target);
         scenes.push({ kind: row.kind === "video" ? "video" : "image", path: target, sceneMs: Number(row.scene_ms || 0) });
       }
-      if (!artwork) {
-        const coverRaw = path.join(work, "gallerycover.raw");
-        await download(await signed(coverStoragePath), coverRaw);
-        const cover = path.join(work, `gallerycover.${sniffImageExtension(await readFile(coverRaw))}`);
-        if (cover !== coverRaw) await writeFile(cover, await readFile(coverRaw));
-        await rm(coverRaw, { force: true });
-        const result = await buildGalleryVideo({
-          audio, cover, scenes, out: output,
-          workDir: path.join(work, "gallery"),
-          onProgress: (line) => { console.log(`[${job.id}] ${line}`); void refreshLease(job.id, job.user_id); },
-        });
-        await assertPlayableVideo(output);
-        console.log(`[ready] ${job.id} (source_gallery, ${result.clips} klipů, ${result.duration.toFixed(2)} s)`);
-      }
+      const result = await buildGalleryVideo({
+        audio, cover: artwork, scenes, out: output,
+        workDir: path.join(work, "gallery"),
+        mediaFilter, seed: String(job.id),
+        onProgress: (line) => { console.log(`[${job.id}] ${line}`); void refreshLease(job.id, job.user_id); },
+      });
+      await assertPlayableVideo(output);
+      console.log(`[ready] ${job.id} (${type}, ${result.clips} klipů, ${result.duration.toFixed(2)} s)`);
     } else if (type === "source_loop") {
       // === větev D2: loop engine (náhrada image_animation a full_scenes) ===
       // Všechno běží lokálním ffmpegem, žádný dashboard, žádné drahé GPU.
@@ -481,7 +542,10 @@ async function tick() {
   const staleBefore = new Date(now.getTime() - 15 * 60 * 1000).toISOString();
   await request(api("agent_videos", `?render_status=eq.rendering&or=(lease_expires_at.is.null,lease_expires_at.lt.${encodeURIComponent(staleBefore)})`), { method: "PATCH", body: JSON.stringify({ render_status: "queued", lease_expires_at: null, error_message: "Worker lease expired; job was requeued." }) }).catch(() => {});
 
-  const jobs = await request(api("agent_videos", "?select=id,user_id,song_id,type,mode,backend,prompt_used,attempt_count,max_attempts,lease_expires_at,audio_storage_path,aspect&render_status=eq.queued&order=created_at.asc&limit=1"));
+  // gallery_kind, cover_lead_path, center_effect a source_video_path MUSÍ být
+// v seznamu. Dřív tu chyběly, takže job.galleryKind i job.source_video_path byly
+// undefined a renderer si vždy bral všechno, i když uživatel vybral jen obrázky.
+const jobs = await request(api("agent_videos", "?select=id,user_id,song_id,type,mode,backend,prompt_used,attempt_count,max_attempts,lease_expires_at,audio_storage_path,aspect,gallery_kind,cover_lead_path,center_effect,source_video_path&render_status=eq.queued&order=created_at.asc&limit=1"));
   const job = jobs?.[0]; if (!job) return;
   const attempt = Number(job.attempt_count || 0) + 1;
   const maxAttempts = Number(job.max_attempts || 3);

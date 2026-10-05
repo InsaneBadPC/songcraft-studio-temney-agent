@@ -224,6 +224,25 @@ const toolDefs = [
     },
   },
   {
+    name: "make_cover_video",
+    description:
+      "Queue a 16:9 video built from the song's own picture: the album cover for 3 seconds, then the song picture with a chosen movement effect (breathe / parallax / steps) for the whole song, then the album cover for 3 seconds again. Use this when the user wants a video with no scenes, just their own artwork. Prefer the Videa tab when the user picks a type themselves.",
+    parameters: {
+      type: "object",
+      properties: {
+        songId: { type: "string" },
+        effect: {
+          type: "string",
+          enum: ["breathe", "parallax", "steps"],
+          description:
+            "Volitelný pohyb na obrázku skladby. breathe = pomalý zoom tam a zpět (nejklidnější), parallax = přední vrstva letí rychleji než zadní (hloubka), steps = obraz se posouvá po skocích jako přehrávač. Bez toho se použije breathe.",
+        },
+        note: { type: "string", description: "Volitelné: jen pro hlediskový záznam" },
+      },
+      required: ["songId"],
+    },
+  },
+  {
     name: "run_vm_command",
     description:
       "Queue one shell command to run on the render VM. Use it for anything you cannot do from here: read logs, restart a service, check disk or a render, run the project's test gates. It is ALWAYS queued as pending and the USER MUST CONFIRM before anything runs, so tell the user exactly what will run and wait. Never use it to publish, never touch the database directly, never read secrets files.",
@@ -1350,6 +1369,8 @@ async function dispatch(
       song.source_video_path.startsWith(`${userId}/`) &&
       !song.source_video_path.includes("..");
     const aspect = isShort ? "9:16" : "16:9";
+    // source_video_path musí být i na řádku v agent_videos, ne jen na písni:
+    // worker si ho bere z jobu, ne ze sc_songs.
     const { data, error } = await admin.from("agent_videos").insert({
       user_id: userId,
       song_id: song.id,
@@ -1378,6 +1399,81 @@ async function dispatch(
       zdroj: hasSourceVideo ? "nahráté video skladby" : "obal skladby",
       hybe_se:
         `Rozjelo se to. Video vznikne ze ${hasSourceVideo ? "nahrátého videa skladby" : "obalu skladby"}, dlouhé je jako skladba, průchody různě dlouhé a přechody nejsou vidět. Slíbeno, jak bude hotovo.`,
+    };
+  }
+
+  // make_cover_video: obál alba 3 s -> obrázek skladby s efektem -> obál alba 3 s
+  if (name === "make_cover_video") {
+    const songs = await admin.from("sc_songs")
+      .select("id,album_id,cover_path")
+      .eq("id", String(args.songId))
+      .eq("user_id", userId)
+      .maybeSingle();
+    const song = songs.data as { id: string; album_id?: string | null; cover_path?: string | null } | null;
+    if (!song) throw new Error("Skladba nebyla nalezena.");
+    // Cesta musí patřit vlastníkovi - stejná kontrola jako u audia níže.
+const songCover = typeof song.cover_path === "string" &&
+      song.cover_path.startsWith(`${userId}/`) &&
+      !song.cover_path.includes("..")
+      ? song.cover_path
+      : null;
+    if (!songCover) throw new Error("K této skladbě není nahrán obrázek skladby.");
+
+    const versions = await admin.from("sc_audio_versions")
+      .select("tagged_storage_path,original_storage_path,storage_path")
+      .eq("song_id", song.id).eq("user_id", userId).eq("is_final", true)
+      .order("is_primary", { ascending: false }).limit(1);
+    const v = (versions.data ?? [])[0] as {
+      tagged_storage_path?: string | null;
+      original_storage_path?: string | null;
+      storage_path?: string | null;
+    } | undefined;
+    const audioPath = v?.tagged_storage_path || v?.original_storage_path || v?.storage_path;
+    if (
+      typeof audioPath !== "string" || !audioPath.startsWith(`${userId}/`) ||
+      audioPath.includes("..")
+    ) throw new Error("Finální MP3 nemá platnou cestu vlastníka.");
+
+    // Obál alba. Když album obal nemá, použije se obál skladby - aby to
+    // neselhávalo kvůli němu, co uživatel v repu nemusel nikdy řešit.
+    let albumCover = null;
+    if (song.album_id) {
+      const albums = await admin.from("sc_albums").select("cover_path")
+        .eq("id", song.album_id).eq("user_id", userId).maybeSingle();
+      const albumCoverPath = (albums.data as { cover_path?: string | null } | null)?.cover_path;
+      albumCover = typeof albumCoverPath === "string" &&
+          albumCoverPath.startsWith(`${userId}/`) &&
+          !albumCoverPath.includes("..")
+          ? albumCoverPath
+          : null;
+    }
+    const coverLeadPath = albumCover ?? songCover;
+
+    const EFFECTS = ["breathe", "parallax", "steps"];
+    const effect = typeof args.effect === "string" && EFFECTS.includes(args.effect) ? args.effect : "breathe";
+
+    const { data, error } = await admin.from("agent_videos").insert({
+      user_id: userId,
+      song_id: song.id,
+      type: "album_cover_intro",
+      mode: "album_cover_intro",
+      backend: "ffmpeg",
+      aspect: "16:9",
+      audio_storage_path: audioPath,
+      prompt_used: clip(args.note, 2_000) || `album_cover_intro, efekt ${effect}`,
+      motion_prompt: null,
+      cover_lead_path: coverLeadPath,
+      center_effect: effect,
+      render_status: "queued",
+    }).select("id,render_status,mode,backend").single();
+    if (error || !data) throw new Error(error?.message || "Render se nepodařilo založit.");
+    await log(admin, userId, name, "success", { videoId: data.id, effect, coverLeadPath }, data.id);
+    return {
+      status: "queued",
+      videoId: data.id,
+      effect,
+      hybe_se:
+        `Rozjelo se to. Video bude mít obál alba 3 sekundy na začátku, pak obrázek skladby s efektem ${effect}, a obál alba zase 3 sekundy na konci.`,
     };
   }
 /** Druhy operací, které jdou do fronty agent_ops na VM. */
@@ -1637,6 +1733,8 @@ VIDEO — pravidla, která nesmíš porušit:
 - Když řekne "udělej to znovu" nebo "chci jinou verzi", klidně použij make_long_video znovu: pokaždé vyjde jiné, protože engine skládá průchody náhodně.
 - make_music_video a make_short jsou jen starší cesta se zadaným motionPrompt. Použij je, jen když uživatel VÝSLOVNĚ řekne, co se má rozpohybovat, a chce přesně to. V takovém případě PŘEDEJ jeho vlastní slova a nic si nepřidávej.
 - Když má píseň nahrané vlastní video, make_music_video i make_short místo plánu pohybu udělají plynulou smyčku z toho videa přes celou skladbu. Není třeba psát motionPrompt a nesmíš tvrdit, že jsi vymyslel vlastní pohyb.
+- make_cover_video dělá video jen z obrazku skladby mezi dvěma obálymi alba (3 s + obrázek + 3 s). Použij ho, když uživatel chce video ze svého artworku a nechce žádné scény. Efekt na obrázku je breathe / parallax / steps; když neřekne který, nech breathe a nehádej.
+- Režimy tabu Videa (gallery_images, gallery_videos, gallery_mixed) uživatel vybírá prstem v panelu doprovodných médií. Když řekne "udělej z těch obrázků video", odkáž ho na tab Videa - ty režimy neposílej, používají pořadí, které nastavil on.
 - make_music_video vrací co se bude hýbat. To uživateli řekni slovy, ne jsonem.
 - Render je asynchronní. Neříkej "hotovo", ale "rozjelo se, hlásím se po dokončení", a pak zkontroluj stav (check_video_status).
 - OPERACE NA VM: run_vm_command, push_git_branch, deploy_worker, read_repo_file a read_skills VŽDY vracejí stav pending_confirmation. To znamená, že se NIC NESPUSTÍ, dokud uživatel neřekne ano. Uživateli vždy napiš slovy, CO přesně se má spustit (příkaz, větev, soubory) a počkej na jeho odpověď. Výsledek operace zjistíš přes check_op_status.

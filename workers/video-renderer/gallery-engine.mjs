@@ -1,12 +1,17 @@
-// Složení videa z více obrázků nebo videí jedné písně.
+// Složení videa z více obrázků nebo videí jedné písně, a ze samotného obrázku
+// skladby mezi dvěma obály alba.
 //
 // Na rozdíl od loop-engine nemá jeden zdroj a náhodný plán průchodů - tady je
 // přesně to, co uživatel vidí v panelu:
 //
-//   [obál písně 5 s] -> [scéna 8 s] -> [scéna 8 s] ... -> [obál písně 5 s]
+//   [obál alba 3 s] -> [scéna 8 s] -> [scéna 8 s] ... -> [obál alba 3 s]
 //
-// Scény se střídají v ručně nastaveném pořadí a opakují se, dokud hraje hudba.
-// Obál je začátek a konec, ne položka smyčky.
+// Scény se střídají V RUČNÍM POŘADÍ a opakují se, dokud hraje hudba. Obál alba
+// je začátek a konec, ne položka smyčky.
+//
+// Druhý režim, album_cover_intro, nemá vůbec scény:
+//
+//   [obál alba 3 s] -> [obrázek skladby, efekt dýchání/parallax/kroky] -> [obál alba 3 s]
 //
 // Každá scéna se znormalizuje na 1280x720 /24 fps, takže se pak dají spojit
 // demuxerem bez překódování - na VM s 954 MB RAM je to jediná varianta, která
@@ -21,10 +26,19 @@ const W = 1280;
 const H = 720;
 const THREADS = "2";
 
-/** Přesné časy zadáním uživatele - když je chceš změnit, jde se sem. */
-export const COVER_LEAD_SECONDS = 5;
-export const COVER_TAIL_SECONDS = 5;
+/**
+ * Přesné časy zadáním uživatele - když je chceš změnit, jde se sem.
+ *
+ * 5. 10. 2026: obál alba 5 s -> 3 s. Kratší úvod nepřebíjí text na obalu,
+ * ale video je pořád čitelné jako hudební videoklip.
+ */
+export const COVER_LEAD_SECONDS = 3;
+export const COVER_TAIL_SECONDS = 3;
 export const SCENE_SECONDS = 8;
+
+/** Krátké video scény trvají 5-10 s; když uživatel neurčí, losuje se mezi nimi. */
+export const VIDEO_SCENE_MIN_SECONDS = 5;
+export const VIDEO_SCENE_MAX_SECONDS = 10;
 
 const ENCODE = [
   "-c:v", "libx264", "-preset", "veryfast", "-crf", "20", "-pix_fmt", "yuv420p",
@@ -45,6 +59,26 @@ async function ffmpeg(args) {
     proc.on("error", reject);
     proc.on("close", (code) => (code === 0 ? resolve() : reject(new Error(`ffmpeg ${code}: ${err.trim()}`))));
   });
+}
+
+/**
+ * Deterministický zdroj náhodnosti ze seeda.
+ *
+ * Stejný vzor jako v loop-engine: xorshift, seed složený z charCode. Proč ne
+ * Math.random: opakovaný render stejné písně musí dát stejné délky scén a
+ * stejný efekt, jinak si uživatel stáhne něco jiného, než minule.
+ */
+export function randomFor(seed, state0 = 0x9e3779b9) {
+  let state = state0 >>> 0;
+  for (const char of String(seed)) {
+    state = (Math.imul(state, 31) + char.charCodeAt(0)) >>> 0;
+  }
+  return function next() {
+    state ^= state << 13; state >>>= 0;
+    state ^= state >>> 17;
+    state ^= state << 5; state >>>= 0;
+    return state / 0x100000000;
+  };
 }
 
 export async function probeDuration(file) {
@@ -79,6 +113,73 @@ async function coverClip(source, seconds, out, label) {
 }
 
 /**
+ * Efekty, které běží na obrázku skladby uprostřed videa.
+ *
+ * Uživatel si vybral, že obrázek nemá být statický - chtěl nějaký pohyb.
+ * Každý efekt je jen jiný ffmpeg filtr, žádný dashboard a žádná GPU, takže
+ * se dá vyrenderovat i na VM s 954 MB RAM.
+ *
+ *   breathe   pomalý zoom tam a zpět + sinusový drift. Nejklidnější varianta.
+ *   parallax  přední vrstva letí rychleji než zadní. Vzniká hloubka.
+ *   steps     obraz se posouvá po skocích, jako přehrávač.
+ *
+ * `variant` zajišťuje, že dvě sousední scény nevypadají stejně, a zároveň
+ * že píseň s jedním obrázkem není nudná.
+ */
+export const CENTER_EFFECTS = ["breathe", "parallax", "steps"];
+
+/**
+ * Graf pro efekt na obrázku. Vrací filtrační řetězec pro `-filter_complex`.
+ *
+ * @param {"breathe"|"parallax"|"steps"} effect
+ * @param {number} frames počet snímků
+ * @param {number} variant 0-3, střídá směr a velikost
+ */
+function centerEffectGraph(effect, frames, variant) {
+  // Velikost a směr se střídají podle varianty, jinak by všechny písně vypadaly
+  // stejně a renderer by neměl proč jinak rozhodovat.
+  const zoomIn = variant % 2 === 0;
+  const magnitude = [1.022, 1.014, 1.030, 1.018][variant % 4];
+  const zoom = zoomIn
+    ? `1.0+${magnitude - 1}*on/${frames}`
+    : `${1 + magnitude - 1}-${magnitude - 1}*on/${frames}`;
+
+  if (effect === "parallax") {
+    // Zadní vrstva: FLAT + slabý zoom. Přední vrstva: výraznější pohyb.
+    // Dvě kopie téhož obrázku se složí přes sebe a jedna se pohybuje rychleji.
+    const depth = [14, 9, 18, 11][variant % 4];
+    const back = `[0:v]${FLAT},scale=${W * 2}:${H * 2},zoompan=z='1.0+0.010*on/${frames}'`
+      + `:x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':s=${W}x${H}:fps=${FPS}[back]`;
+    const front = `[0:v]${FLAT},scale=${W * 2}:${H * 2},zoompan=z='1.0+0.026*on/${frames}'`
+      + `:x='iw/2-(iw/zoom/2)+${depth}*sin(2*PI*on/${frames})'`
+      + `:y='ih/2-(ih/zoom/2)+${depth * 0.6}*sin(2*PI*on/${frames * 0.7})'`
+      + `:s=${W}x${H}:fps=${FPS}[front]`;
+    // Přední vrstva lehce zesvětlená, aby se od zadní odlišila i bez pohybu.
+    return `${back};${front};[back][front]blend=all_mode=screen:all_opacity=0.88,setsar=1[v]`;
+  }
+
+  if (effect === "steps") {
+    // Posun po skocích: 8 kroků, každý drží 1/8 doby. offset=out před každým
+    // krokem znamená skok místo plynulého pohybu.
+    const steps = 8;
+    const drift = [46, 34, 58, 40][variant % 4];
+    const dirX = zoomIn ? "1" : "-1";
+    const dirY = variant < 2 ? "1" : "-1";
+    return `[0:v]${FLAT},scale=${W * 2}:${H * 2},zoompan=z='${zoom}'`
+      + `:x='iw/2-(iw/zoom/2)+${dirX}*${drift}*floor(on/${frames}/${steps})'`
+      + `:y='ih/2-(ih/zoom/2)+${dirY}*${drift}*0.6*floor(on/${frames}/${steps})'`
+      + `:s=${W}x${H}:fps=${FPS},setsar=1[v]`;
+  }
+
+  // breathe - výchozí varianta.
+  const driftX = zoomIn ? `+16*sin(2*PI*on/${frames})` : `-16*sin(2*PI*on/${frames})`;
+  const driftY = variant < 2 ? `+11*sin(2*PI*on/${frames * 0.6})` : `-11*sin(2*PI*on/${frames * 0.6})`;
+  return `[0:v]${FLAT},zoompan=z='${zoom}'`
+    + `:x='iw/2-(iw/zoom/2)+${driftX}':y='ih/2-(ih/zoom/2)+${driftY}'`
+    + `:s=${W}x${H}:fps=${FPS},setsar=1[v]`;
+}
+
+/**
  * Scéna z obrázku - jemný Ken Burns. Směr a velikost se střídají, aby dvě
  * sousední scény nevypadaly stejně. Rychlost je záměrně malá.
  */
@@ -92,6 +193,23 @@ async function imageScene(source, seconds, out, index) {
   const graph = `[0:v]${FLAT},zoompan=z='${zoom}'`
     + `:x='iw/2-(iw/zoom/2)+${driftX}':y='ih/2-(ih/zoom/2)+${driftY}'`
     + `:s=${W}x${H}:fps=${FPS},setsar=1[v]`;
+  await ffmpeg([
+    "-threads", THREADS, "-loop", "1", "-framerate", String(FPS), "-i", source,
+    "-filter_complex", graph, "-map", "[v]",
+    "-frames:v", String(frames), ...ENCODE, "-y", out,
+  ]);
+  return frames;
+}
+
+/**
+ * Obrázek skladby jako celý prostředek videa s vybraným efektem.
+ *
+ * Toto je `album_cover_intro`: [obál alba 3 s] -> [obrázek skladby s efektem]
+ * -> [obál alba 3 s]. Obál je kratší než obrázek, proto se do něj vejde celý.
+ */
+async function songCoverCenter(source, seconds, out, effect, variant) {
+  const frames = Math.max(1, Math.round(seconds * FPS));
+  const graph = centerEffectGraph(effect, frames, variant);
   await ffmpeg([
     "-threads", THREADS, "-loop", "1", "-framerate", String(FPS), "-i", source,
     "-filter_complex", graph, "-map", "[v]",
@@ -121,9 +239,14 @@ async function videoScene(source, seconds, out, index) {
 }
 
 /**
+ * Složení videa z doprovodných médií.
+ *
  * @param {{audio: string, cover: string, scenes: {kind: "image"|"video", path: string, sceneMs?: number}[],
  *          out: string, workDir: string, onProgress?: (l: string) => void,
- *          coverLeadSeconds?: number, coverTailSeconds?: number, sceneSeconds?: number}} options
+ *          coverLeadSeconds?: number, coverTailSeconds?: number, sceneSeconds?: number,
+ *          seed?: string}} options
+ *   `cover` je OBAŁ ALBA (začátek a konec). `scenes` jsou doprovodná média
+ *   V POŘADÍ, JAKÉ JE UŽIVATEL NAŘADIL V PANELU.
  */
 export async function buildGalleryVideo(options) {
   const {
@@ -131,10 +254,11 @@ export async function buildGalleryVideo(options) {
     coverLeadSeconds = COVER_LEAD_SECONDS,
     coverTailSeconds = COVER_TAIL_SECONDS,
     sceneSeconds = SCENE_SECONDS,
+    seed = "songcraft",
   } = options;
 
   if (!audio) throw new Error("gallery engine potřebuje audio pro určení délky videa");
-  if (!cover) throw new Error("gallery engine potřebuje obál písně");
+  if (!cover) throw new Error("gallery engine potřebuje obál alba");
   if (!scenes || !scenes.length) throw new Error("gallery engine potřebuje alespoň jednu scénu");
 
   await mkdir(workDir, { recursive: true });
@@ -142,7 +266,7 @@ export async function buildGalleryVideo(options) {
   const lead = Math.min(coverLeadSeconds, duration / 3);
   const tail = Math.min(coverTailSeconds, Math.max(0, duration - lead));
   const body = Math.max(0, duration - lead - tail);
-  onProgress(`skladba ${duration.toFixed(2)} s · obál ${lead}s + scény ${body.toFixed(2)}s + obál ${tail}s`);
+  onProgress(`skladba ${duration.toFixed(2)} s · obál alba ${lead}s + scény ${body.toFixed(2)}s + obál alba ${tail}s`);
 
   const clips = [];
   const totalFrames = Math.max(1, Math.round(duration * FPS));
@@ -157,7 +281,7 @@ export async function buildGalleryVideo(options) {
     await coverClip(cover, want / FPS, file, tag);
     madeFrames += want;
     clips.push(file);
-    onProgress(`  obál ${tag}: ${(want / FPS).toFixed(2)} s`);
+    onProgress(`  obál alba ${tag}: ${(want / FPS).toFixed(2)} s`);
   };
 
   const addScene = async (scene) => {
@@ -177,17 +301,46 @@ export async function buildGalleryVideo(options) {
 
   const sceneSecondsTotal = body > 0 ? sceneSeconds : 0;
   let cursor = 0;
-  const images = scenes.filter((s) => s.kind === "image");
-  const videos = scenes.filter((s) => s.kind === "video");
-  // Preferujeme to, co uživatel v panelu vidí a nařadil. Když zvolí režim
-  // "z obrázků" a nahrá i videa, pustíme se obou - smysl smyčky tím nepřestane.
-  const ordered = images.length + videos.length > 1 ? [...images, ...videos] : scenes;
-  const pool = ordered.length ? ordered : scenes;
+
+  // KRÁTKÉ VIDEOSCÉNY 5-10 s. Když uživatel neurčí own délku (scene_ms = 0),
+  // losujeme mezi 5 a 10 podle seedu písně - různé písně mají jiné délky
+  // scén, ale stejná píseň se vyrenderuje stejně.
+  const random = randomFor(seed);
+  const videoSceneSeconds = () =>
+    VIDEO_SCENE_MIN_SECONDS
+    + Math.round(random() * (VIDEO_SCENE_MAX_SECONDS - VIDEO_SCENE_MIN_SECONDS));
+
+  // Řád podle výběru režimu:
+  //   gallery_images  jen obrázky
+  //   gallery_videos  jen videa
+  //   gallery_mixed   VŠE V POŘADÍ Z DATABÁZE
+  //
+  // Dřívější kód tu byl `[...images, ...videos]`, což házelo uživatelovo
+  // pořadí pryč - obrázky se vždy posunuly před videa. U kombinovaného videa
+  // je pořadí, které uživatel nastavil prstem, jediné správné pořadí.
+  const wanted = (options.mediaFilter || "mixed").toString();
+  let pool = scenes;
+  if (wanted === "image") pool = scenes.filter((s) => s.kind === "image");
+  else if (wanted === "video") pool = scenes.filter((s) => s.kind === "video");
+  // "mixed" nechává scenes tak, jak přišly z databáze.
+
+  if (!pool.length) {
+    throw new Error(
+      wanted === "image"
+        ? "K této skladbě nejsou nahrány žádné doprovodné obrázky."
+        : wanted === "video"
+          ? "K této skladbě nejsou nahrána žádná doprovodná videa."
+          : "K této skladbě nejsou nahrána žádná doprovodná média.",
+    );
+  }
 
   while (cursor < body - 0.05 && pool.length) {
     for (const scene of pool) {
       if (cursor >= body - 0.05) break;
-      const want = Math.min(sceneSecondsTotal, body - cursor);
+      const planned = scene.kind === "video"
+        ? (scene.sceneMs && scene.sceneMs > 0 ? scene.sceneMs / 1000 : videoSceneSeconds())
+        : sceneSecondsTotal;
+      const want = Math.min(planned, body - cursor);
       if (want <= 0.05) break;
       await addScene({ ...scene, sceneMs: Math.round(want * 1000) });
       cursor += want;
@@ -198,8 +351,14 @@ export async function buildGalleryVideo(options) {
   await addCover(tail, "cover-tail");
 
   // Poslední scéna musí přesně vyplnit rámce, jinak by smyčka skočila.
+  //
+  // Cesty v manifestu MUSÍ být absolutní. Concat demuxer řeší relativní cesty
+  // vzhledem k adresáři, kde je concat.txt, ne ke cwd - a ten je workDir. U
+  // relativní cesty tak hledá `workDir/workDir/scena0000.mp4`. Tuhle chybu
+  // nebylo vidět dřív, protože větev source_gallery nikdy nesplnila svůj
+  // `if (!artwork)` a engine se nezavolal.
   const manifest = path.join(workDir, "concat.txt");
-  await writeFile(manifest, `${clips.map((file) => `file '${file.replace(/'/g, "'\\''")}'`).join("\n")}\n`, "utf8");
+  await writeFile(manifest, `${clips.map((file) => `file '${path.resolve(file).replace(/'/g, "'\\''")}'`).join("\n")}\n`, "utf8");
 
   const staged = path.join(workDir, "silent.mp4");
   await ffmpeg([
@@ -228,4 +387,110 @@ export async function buildGalleryVideo(options) {
 
 export async function readIfExists(file) {
   return readFile(file, "utf8").catch(() => "");
+}
+
+/**
+ * Efekt na obrázku skladby, když ho uživatel nevybral.
+ *
+ * Volba musí být z `CENTER_EFFECTS`. Renderer neháde - kdyby poslal něco
+ * jiného, raději použije breathe a pokračuje, než aby skončil chybou.
+ */
+export function normalizeCenterEffect(value) {
+  return CENTER_EFFECTS.includes(value) ? value : "breathe";
+}
+
+/**
+ * Složení videa, kde je uprostřed obrázek skladby s efektem.
+ *
+ *   [obál alba 3 s] -> [obrázek skladby, dýchání/parallax/kroky] -> [obál alba 3 s]
+ *
+ * `cover` je obál ALBA. `songCover` je obrázek SKLADBY - to jsou dvě různé
+ * věci, proto dvě cesty. Pokud album obal nemá, caller pošle do `cover`
+ * obál skladby, aby to nikdy neselhalo.
+ *
+ * @param {{audio: string, cover: string, songCover: string, out: string, workDir: string,
+ *          effect?: "breathe"|"parallax"|"steps", seed?: string,
+ *          coverLeadSeconds?: number, coverTailSeconds?: number, onProgress?: (l: string) => void}} options
+ */
+export async function buildSongCoverVideo(options) {
+  const {
+    audio, cover, songCover, out, workDir, onProgress = () => {},
+    effect = "breathe", seed = "songcraft",
+    coverLeadSeconds = COVER_LEAD_SECONDS,
+    coverTailSeconds = COVER_TAIL_SECONDS,
+  } = options;
+
+  if (!audio) throw new Error("song cover engine potřebuje audio pro určení délky videa");
+  if (!cover) throw new Error("song cover engine potřebuje obál alba");
+  if (!songCover) throw new Error("song cover engine potřebuje obrázek skladby");
+  // Neznámý efekt není důvod shodit celý render - běžeme na breathe.
+  const chosen = normalizeCenterEffect(effect);
+
+  await mkdir(workDir, { recursive: true });
+  const duration = await probeDuration(audio);
+  const lead = Math.min(coverLeadSeconds, duration / 3);
+  const tail = Math.min(coverTailSeconds, Math.max(0, duration - lead));
+  const body = Math.max(0, duration - lead - tail);
+  const label = CENTER_EFFECTS.join(" / ");
+  onProgress(`skladba ${duration.toFixed(2)} s · obál alba ${lead}s + obrázek skladby (${chosen}) ${body.toFixed(2)}s + obál alba ${tail}s`);
+
+  const clips = [];
+  const totalFrames = Math.max(1, Math.round(duration * FPS));
+  let madeFrames = 0;
+
+  const addCover = async (seconds, tag) => {
+    const remaining = totalFrames - madeFrames;
+    if (remaining <= 0) return;
+    const want = Math.min(Math.round(seconds * FPS), remaining);
+    const file = path.join(workDir, `${tag}.mp4`);
+    await coverClip(cover, want / FPS, file, tag);
+    madeFrames += want;
+    clips.push(file);
+    onProgress(`  obál alba ${tag}: ${(want / FPS).toFixed(2)} s`);
+  };
+
+  // Efekt se volí ze seedu písně, aby dvě písně nevypadaly stejně, ale stejná
+  // píseň se vyrenderovala pokaždé stejně.
+  const random = randomFor(`${seed}:effect`);
+  const variant = Math.floor(random() * 4);
+
+  await addCover(lead, "cover-lead");
+
+  if (body > 0.05) {
+    const want = Math.min(Math.round(body * FPS), totalFrames - madeFrames);
+    const file = path.join(workDir, "song-cover-center.mp4");
+    await songCoverCenter(songCover, want / FPS, file, chosen, variant);
+    madeFrames += want;
+    clips.push(file);
+    onProgress(`  obrázek skladby: ${(want / FPS).toFixed(2)} s (${chosen}, varianta ${variant} z [${label}])`);
+  }
+
+  await addCover(tail, "cover-tail");
+
+  // Absolutní cesty - viz poznámka u buildGalleryVideo.
+  const manifest = path.join(workDir, "concat.txt");
+  await writeFile(manifest, `${clips.map((file) => `file '${path.resolve(file).replace(/'/g, "'\\''")}'`).join("\n")}\n`, "utf8");
+
+  const staged = path.join(workDir, "silent.mp4");
+  await ffmpeg([
+    "-threads", THREADS, "-f", "concat", "-safe", "0", "-i", manifest,
+    "-c:v", "copy", "-an", "-y", staged,
+  ]);
+
+  await ffmpeg([
+    "-threads", THREADS, "-i", staged, "-i", audio,
+    "-map", "0:v:0", "-map", "1:a:0",
+    "-c:v", "copy", "-c:a", "aac", "-b:a", "192k",
+    "-shortest", "-movflags", "+faststart", "-y", out,
+  ]);
+
+  const finalDuration = await probeDuration(out);
+  onProgress(`hotovo: ${finalDuration.toFixed(2)} s z ${(madeFrames / FPS).toFixed(2)} s obrazu, ${clips.length} klipů`);
+  if (Math.abs(finalDuration - duration) > 1.0) {
+    onProgress(`POZOR: výstup ${finalDuration.toFixed(2)} s, očekáváno ${duration.toFixed(2)} s`);
+  }
+
+  for (const file of clips) await rm(file, { force: true });
+  await rm(staged, { force: true });
+  return { duration: finalDuration, clips: clips.length, frames: madeFrames, effect: chosen, variant };
 }

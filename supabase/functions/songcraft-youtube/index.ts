@@ -43,7 +43,7 @@ Deno.serve(async (request) => {
   if (authError || !user) return json({ error: "Neplatné přihlášení." }, 401);
   if (!isAllowedPrivateUser(user, { allowedUserIds: Deno.env.get("SONGCRAFT_ALLOWED_USER_IDS") ?? undefined, allowedEmails: Deno.env.get("SONGCRAFT_ALLOWED_EMAILS") ?? undefined })) return json({ error: privateAccessMessage() }, 403);
   const admin = createClient(url, serviceKey);
-  const input = await request.json().catch(() => null) as { action?: unknown; songId?: unknown; versionId?: unknown; effect?: unknown; mode?: unknown; galleryKind?: unknown; jobId?: unknown } | null;
+  const input = await request.json().catch(() => null) as { action?: unknown; songId?: unknown; versionId?: unknown; effect?: unknown; mode?: unknown; galleryKind?: unknown; centerEffect?: unknown; jobId?: unknown } | null;
 
   if (input?.action === "check") {
     if (typeof input.jobId !== "string" || !uuid.test(input.jobId)) return json({ error: "Neplatné jobId." }, 400);
@@ -76,12 +76,61 @@ Deno.serve(async (request) => {
   }
   if (!audioPath || !coverPath) return json({ error: "Finální MP3 nebo obal nemá platnou cestu vlastníka." }, 409);
 
-  const requestedMode = typeof input.mode === "string" && ["static_cover", "image_animation", "full_scenes", "source_gallery"].includes(input.mode) ? input.mode : null;
+  // Tab Videa posílá čtyři nové režimy. Staré tři (static_cover,
+  // image_animation, full_scenes) zůstávají, protože je používá export/youtube
+  // a Temney Agent.
+  const VIDEO_TAB_MODES = ["album_cover_intro", "gallery_images", "gallery_videos", "gallery_mixed"];
+  const LEGACY_MODES = ["static_cover", "image_animation", "full_scenes"];
+  // Dřív tu byla ternární řetězec a `source_gallery` mapoval na
+  // `vm_source_loop`, což v žádné migraci nebylo povolené - každý pokus o
+  // "video z doprovodných obrázků" tak končil 502. Tady je to tabulka.
+  const BACKENDS: Record<string, string> = {
+    static_cover: "ffmpeg",
+    image_animation: "vm_image_animation",
+    full_scenes: "vm_full_scenes",
+    album_cover_intro: "ffmpeg",
+    gallery_images: "vm_gallery",
+    gallery_videos: "vm_gallery",
+    gallery_mixed: "vm_gallery",
+  };
+  const EFFECT_CHOICES = ["breathe", "parallax", "steps"];
+
+  const requestedMode = typeof input.mode === "string" && [...VIDEO_TAB_MODES, ...LEGACY_MODES].includes(input.mode) ? input.mode : null;
   const mode = requestedMode || (effect === "static" ? "static_cover" : "image_animation");
   // source_gallery skládá víc obrázků nebo videí jedné písně na VM stejně jako
   // source_loop - jen si vezme celou galerii místo jednoho zdroje.
-  const backend = mode === "static_cover" ? "ffmpeg" : mode === "source_gallery" ? "vm_source_loop" : mode === "image_animation" ? "vm_image_animation" : "vm_full_scenes";
+  const backend = BACKENDS[mode] ?? "ffmpeg";
   const galleryKind = input.galleryKind === "image" || input.galleryKind === "video" ? input.galleryKind : null;
+  const centerEffect = typeof input.centerEffect === "string" && EFFECT_CHOICES.includes(input.centerEffect) ? input.centerEffect : null;
+
+  // OBÁL ALBA. Tab Videa chce obál alba na začátku a na konci a obrázek skladby
+  // uprostřed. To jsou dvě různé věci, takže obál alba jde zvlášť.
+  let albumCoverLead: string | null = null;
+  if (song.album_id) {
+    const { data: album } = await admin.from("sc_albums").select("cover_path").eq("id", song.album_id).eq("user_id", user.id).maybeSingle();
+    albumCoverLead = ownedPath(user.id, album?.cover_path);
+  }
+  // Bez obalu alba sklouzneme na obal skladby, aby video fungovalo vždy.
+  const coverLeadPath = albumCoverLead ?? coverPath;
+
+  // Režimy, které potřebují doprovodná média, musí mít v čem složit. Když je
+  // nemají, je lepší říct to teď než po hodině čekání na render.
+  if (mode === "gallery_images" || mode === "gallery_videos" || mode === "gallery_mixed") {
+    const kindFilter = mode === "gallery_images" ? "image" : mode === "gallery_videos" ? "video" : null;
+    let mediaQuery = admin.from("sc_song_media").select("id,kind").eq("song_id", song.id).eq("user_id", user.id);
+    if (kindFilter) mediaQuery = mediaQuery.eq("kind", kindFilter);
+    const { data: media, error: mediaError } = await mediaQuery.limit(1);
+    if (mediaError) return json({ error: "Doprovodná média se nepodařilo načíst." }, 502);
+    if (!media?.length) {
+      return json({
+        error: mode === "gallery_images"
+          ? "K této skladbě nejsou nahrány žádné doprovodné obrázky. Přidej je v editoru písně."
+          : mode === "gallery_videos"
+            ? "K této skladbě nejsou nahrána žádná doprovodná videa. Přidej je v editoru písně."
+            : "K této skladbě nejsou nahrána žádná doprovodná média. Přidej je v editoru písně.",
+      }, 409);
+    }
+  }
   const renderPrompt = `SongCraft video mode: ${mode}. Song: ${clip(song.title, 140)}. Style: ${clip(song.style_prompt, 600)}. Lyrics/context: ${clip(song.lyrics, 2_400)}. Legacy effect: ${effect}.`;
   const { data: job, error: createError } = await admin.from("agent_videos").insert({
     user_id: user.id,
@@ -91,6 +140,8 @@ Deno.serve(async (request) => {
     backend,
     audio_storage_path: audioPath,
     prompt_used: renderPrompt,
+    cover_lead_path: coverLeadPath,
+    ...(centerEffect ? { center_effect: centerEffect } : {}),
     ...(galleryKind ? { gallery_kind: galleryKind } : {}),
     render_status: "queued",
   }).select("id,render_status,mode,backend").single();

@@ -1,6 +1,7 @@
 import { supabase } from "@/lib/supabase";
 import { getPlayableAudioUrl } from "@/lib/audio-source";
 import { assertOwnedStoragePath, buildOwnedStoragePath, validateStorageUpload } from "@/lib/storage-paths";
+import { checkVideoModeReadiness } from "@/lib/video-modes";
 
 export type StudioAlbum = {
   id: string;
@@ -306,8 +307,23 @@ export type ExternalYoutubeVideo =
 
 export const YOUTUBE_EFFECTS = ["static", "zoom", "wave", "zoom_wave", "blur"] as const;
 export type YoutubeEffect = (typeof YOUTUBE_EFFECTS)[number];
+
+/**
+ * Režimy starší obrazovky export/youtube.
+ *
+ * `source_gallery` tu zůstává, aby se nepřepsalo existující UI, ale už ho
+ * nikdo nenabízí - tab Videa má vlastní čtyři režimy v `lib/video-modes.ts`.
+ * Server `source_gallery` vrací 400, protože v databázi není povolený.
+ */
 export const EXTERNAL_VIDEO_MODES = ["static_cover", "image_animation", "full_scenes", "source_gallery"] as const;
 export type ExternalVideoMode = (typeof EXTERNAL_VIDEO_MODES)[number];
+
+/** Režimy tabu Videa. Zdroj pravdy je `lib/video-modes.ts`. */
+export const VIDEO_TAB_MODES = ["album_cover_intro", "gallery_images", "gallery_videos", "gallery_mixed"] as const;
+export type VideoTabMode = (typeof VIDEO_TAB_MODES)[number];
+
+export const CENTER_EFFECT_CHOICES = ["breathe", "parallax", "steps"] as const;
+export type CenterEffect = (typeof CENTER_EFFECT_CHOICES)[number];
 
 export type GalleryKind = "image" | "video";
 
@@ -319,6 +335,87 @@ export async function createExternalYoutubeVideo(
     body: { action: "create", songId, versionId, effect, ...(mode ? { mode } : {}), ...(galleryKind ? { galleryKind } : {}) },
   });
   return assert(data, error) as ExternalYoutubeVideo;
+}
+
+/**
+ * Založí render z tabu Videa.
+ *
+ * Oddělená funkce, ne přidání parametru k `createExternalYoutubeVideo`, protože
+ * tady jde o jiný směr smlouvy: `centerEffect` a `cover_lead_path` se nikdy
+ * neposílají z exportu a starší UI je nepotřebuje.
+ */
+export async function createVideoTabRender(input: {
+  songId: string;
+  versionId: string;
+  mode: VideoTabMode;
+  centerEffect?: CenterEffect | null;
+}) {
+  const { data, error } = await supabase.functions.invoke("songcraft-youtube", {
+    body: {
+      action: "create",
+      songId: input.songId,
+      versionId: input.versionId,
+      effect: "static",
+      mode: input.mode,
+      ...(input.centerEffect ? { centerEffect: input.centerEffect } : {}),
+    },
+  });
+  return assert(data, error) as ExternalYoutubeVideo;
+}
+
+export type VideoTabReadiness = ReturnType<typeof checkVideoModeReadiness>;
+
+/**
+ * Počítá, zda píseň má dost podkladu pro režim z tabu Videa.
+ *
+ * SYNCNÍ záměrně: volá se z renderu Reactu při kreslení řádku, ne z event
+ * handleru. Dotaz do databáze by při 30 písních znamenal 30 dotazů na snímek.
+ * `async` verze by vrátila Promise a `.ready` by nikdy nebylo pravda.
+ *
+ * Převaluje `checkVideoModeReadiness` z `lib/video-modes.ts` - logika je
+ * jednou, tady se jen doplní vstup ze snapshota.
+ */
+export function checkVideoTabReadiness(input: {
+  songId: string;
+  mode: VideoTabMode;
+  imageCount: number;
+  videoCount: number;
+  hasFinalAudio: boolean;
+  hasSongCover: boolean;
+}): VideoTabReadiness {
+  return checkVideoModeReadiness(input);
+}
+
+/** Stupeň připravenosti: bez obalu alba je to jen poznámka, ne překážka. */
+export function albumCoverNote(albumCoverUrl: string | null): string | null {
+  return albumCoverUrl ? null : "album nemá obal, použije se obál skladby";
+}
+
+/**
+ * Počty doprovodných médií jedné písně.
+ *
+ * `media` není součástí snapshotu, protože u písně s 30 scénami by to byl
+ * obrovský payload. Tab Videa si proto načte jen čísla přes tento dotaz.
+ */
+export async function listSongMediaCounts(songIds: string[]) {
+  if (!songIds.length) return [] as { songId: string; images: number; videos: number }[];
+  const user = await owner();
+  const { data, error } = await supabase
+    .from("sc_song_media")
+    .select("song_id,kind")
+    .eq("user_id", user.id)
+    .in("song_id", songIds);
+  if (error) throw new Error(error.message);
+
+  const counts = new Map<string, { songId: string; images: number; videos: number }>();
+  for (const id of songIds) counts.set(id, { songId: id, images: 0, videos: 0 });
+  for (const row of data ?? []) {
+    const entry = counts.get(row.song_id as string);
+    if (!entry) continue;
+    if (row.kind === "video") entry.videos += 1;
+    else entry.images += 1;
+  }
+  return [...counts.values()];
 }
 
 export async function checkExternalYoutubeVideo(songId: string, versionId: string, jobId: string) {
@@ -549,6 +646,29 @@ export async function addExternalSongMedia(input: {
 export async function removeExternalSongMedia(id: string) {
   const user = await owner();
   const { error } = await supabase.from("sc_song_media").delete().eq("id", id).eq("user_id", user.id);
+  if (error) throw new Error(error.message);
+}
+
+/**
+ * Nastaví délku scény v milisekundách.
+ *
+ * Sloupec `scene_ms` v databázi existoval, ale nikdo do něj nezapisoval, takže
+ * všechny scény měly 8 s a uživatel nemohl změnit délku videa scény.
+ *
+ *   0   = renderer použije výchozí hodnotu (8 s obrázek, 5-10 s video)
+ *   5000-10000 = vlastní délka; u videa smí být cca 5-10 s, protože to je
+ *                rozsah, který renderer kreslí a při jiném by scéna nedávala smysl
+ */
+export const SCENE_MS_CHOICES = [0, 5000, 8000, 10000] as const;
+
+export async function setExternalSongMediaSceneMs(id: string, sceneMs: number) {
+  const user = await owner();
+  const value = Math.max(0, Math.trunc(sceneMs));
+  const { error } = await supabase
+    .from("sc_song_media")
+    .update({ scene_ms: value })
+    .eq("id", id)
+    .eq("user_id", user.id);
   if (error) throw new Error(error.message);
 }
 
