@@ -62,13 +62,19 @@ async function resolveToken() {
   return fromEnv;
 }
 
+/** Project ref, který je zapsaný v kódu aplikace. */
+async function projectRefFromCode() {
+  const source = await readFile(path.join(ROOT, 'lib', 'supabase.ts'), 'utf8');
+  const match = source.match(/https:\/\/([a-z0-9]{20})\.supabase\.co/);
+  return match ? match[1] : null;
+}
+
 async function resolveProjectRef() {
   const fromEnv = (process.env.SUPABASE_PROJECT_REF ?? process.env.SUPABASE_PROJECT_ID ?? '').trim();
   if (fromEnv) return fromEnv;
-  const source = await readFile(path.join(ROOT, 'lib', 'supabase.ts'), 'utf8');
-  const match = source.match(/https:\/\/([a-z0-9]{20})\.supabase\.co/);
-  if (!match) fail('could not determine project ref; set SUPABASE_PROJECT_REF');
-  return match[1];
+  const fromCode = await projectRefFromCode();
+  if (!fromCode) fail('could not determine project ref; set SUPABASE_PROJECT_REF');
+  return fromCode;
 }
 
 async function api(token, { method, endpoint, body }) {
@@ -241,6 +247,18 @@ async function main() {
   const migrations = await localMigrations();
   console.log(`project ref: ${ref}`);
   console.log(`local migrations: ${migrations.length}`);
+
+  // Když je SUPABASE_PROJECT_REF zadaný zvenku, nesmí se tiše přehlédnout, že
+  // ukazuje jinam než kód. Migrace na jiný projekt je nevratná, takže tady
+  // radši jednou skončíme, než se napíšeme do cizí databáze.
+  const envRef = (process.env.SUPABASE_PROJECT_REF ?? process.env.SUPABASE_PROJECT_ID ?? '').trim();
+  const fromCode = await projectRefFromCode();
+  if (envRef && fromCode && envRef !== fromCode) {
+    fail(
+      `SUPABASE_PROJECT_REF (${envRef}) nesouhlasí s lib/supabase.ts (${fromCode}). ` +
+        'Migrace by šla jinam než kam míří aplikace. Zastaveno, než něco vznikne ve špatném projektu.',
+    );
+  }
 
   if (DRY_RUN) {
     for (const migration of migrations) console.log(`  ${migration.version}  ${migration.label}`);
