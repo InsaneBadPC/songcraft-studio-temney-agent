@@ -175,8 +175,9 @@ async function buildSeamlessBase(video, out, frameCount) {
   const loopUnit = path.join(path.dirname(out), ".loopunit.mp4");
   try {
     await ffmpeg(["-threads", THREADS, "-filter_threads", "1", "-i", video, "-filter_complex",
-      `[0:v]trim=start_frame=0:end_frame=${main},setpts=PTS-STARTPTS[a];`
-      + `[0:v]trim=start_frame=${main}:end_frame=${frameCount},setpts=PTS-STARTPTS[b];`
+      `[0:v]scale=${W}:${H}:force_original_aspect_ratio=increase,crop=${W}:${H},setsar=1,format=yuv420p,split=2[va][vb];`
+      + `[va]trim=start_frame=0:end_frame=${main},setpts=PTS-STARTPTS[a];`
+      + `[vb]trim=start_frame=${main}:end_frame=${frameCount},setpts=PTS-STARTPTS[b];`
       + `[a][b]xfade=transition=fade:duration=${(fade / FPS).toFixed(4)}`
       + `:offset=${((main - fade) / FPS).toFixed(4)},format=yuv420p[v]`,
       "-map", "[v]", "-frames:v", String(main), ...ENCODE, "-y", loopUnit]);
