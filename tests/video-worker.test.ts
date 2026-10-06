@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 
 const worker = readFileSync("workers/video-renderer/worker.mjs", "utf8");
 const engine = readFileSync("workers/video-renderer/loop-engine.mjs", "utf8");
+const gallery = readFileSync("workers/video-renderer/gallery-engine.mjs", "utf8");
 
 
 describe("Oracle video worker contract", () => {
@@ -140,5 +141,17 @@ describe("Oracle video worker contract", () => {
     expect(engine).toContain("joinFrames");
     // 'cut' musi pokracovat presne od konce predchoziho pruchodu
     expect(engine).toContain("endFrame");
+  });
+
+  it("does not re-decode a still image for every frame of a short", () => {
+    // Regrese: `-loop 1` na vstupu rozbalil PNG znovu pro kazdy snimek a
+    // 24 s verticalniho klipu trvalo na 2jádrové VM 7 minut. `loop` filtr
+    // (size=1) si snimek v pameti podrzi - 3x rychleji, vysledek bitove stejny.
+    const shortClip = gallery.slice(
+      gallery.indexOf("async function shortContentClip"),
+      gallery.indexOf("export async function buildShortVideo"),
+    );
+    expect(shortClip).toContain("loop=loop=-1:size=1:start=0");
+    expect(shortClip).not.toContain('"-loop", "1"');
   });
 });

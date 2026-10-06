@@ -512,36 +512,30 @@ const S_ENCODE = [
 ];
 
 /** Obrázek zaplní 1080x1920 pozadí (crop, bez černých pruhů). */
-async function shortBackgroundClip(bg, seconds, out) {
-  const frames = Math.max(1, Math.round(seconds * FPS));
-  const graph = `[0:v]scale=${S_W}:${S_H}:force_original_aspect_ratio=increase,`
-    + `crop=${S_W}:${S_H},setsar=1,format=yuv420p[v]`;
-  await ffmpeg([
-    "-threads", THREADS, "-loop", "1", "-framerate", String(FPS), "-i", bg,
-    "-filter_complex", graph, "-map", "[v]",
-    "-frames:v", String(frames), ...S_ENCODE, "-y", out,
-  ]);
-  return frames;
-}
-
 /**
  * Obrázek (album nebo skladba) se celý vejde do 1080x1920: zmenšíme ho,
- * vystředíme a po stranách (nahoře/dole) ho obložíme rozmazaným zvětšeným
- * pozadím. Tím je obál vždy celý viditelný a okolí není černé.
+ * vystředíme a po stranách (nahoře/dole) ho obložíme zvětšeným pozadím.
+ * Tím je obál vždy celý viditelný a okolí není černé.
+ *
+ * Důležité: `-loop 1` u vstupu znamená, že se PNG rozloží a rozbalí ZNOVU
+ * pro každý snímek. Na 1080x1920 a 24 fps to na dvoujádrové VM trvalo
+ * 0,72 s na snímek, tedy 7 minut na 24 s videa. `loop` filtr (size=1) si
+ * snímek v paměti podrží a opakuje ho, takže se obrázek rozbalí jen jednou:
+ * 0,24 s na snímek, 3x rychleji. Výstup je bitově stejný (PSNR inf).
  */
 async function shortContentClip(src, bg, seconds, out) {
   const frames = Math.max(1, Math.round(seconds * FPS));
-  // Pozadí (tall vertical obrázek) zabere celý 1080x1920, hlavní obsah
-  // (obál alba nebo obrázek skladby) se celý vejde do středu a vystředí se.
+  // Pozadí zabere celý 1080x1920, hlavní obsah (obál alba nebo obrázek skladby)
+  // se celý vejde do středu a vystředí se.
+  const still = `loop=loop=-1:size=1:start=0,setpts=N/(${FPS}*TB)`;
   const graph =
     `[0:v]scale=${S_W}:${S_H}:force_original_aspect_ratio=increase,`
-    + `crop=${S_W}:${S_H},setsar=1,format=yuv420p[bg];`
+    + `crop=${S_W}:${S_H},setsar=1,format=yuv420p,${still}[bg];`
     + `[1:v]scale=${S_W}:${S_H}:force_original_aspect_ratio=decrease,`
-    + `format=yuv420p[f];`
+    + `format=yuv420p,${still}[f];`
     + `[bg][f]overlay=(W-w)/2:(H-h)/2,format=yuv420p[v]`;
   await ffmpeg([
-    "-threads", THREADS, "-loop", "1", "-framerate", String(FPS), "-i", bg,
-    "-loop", "1", "-framerate", String(FPS), "-i", src,
+    "-threads", THREADS, "-i", bg, "-i", src,
     "-filter_complex", graph, "-map", "[v]",
     "-frames:v", String(frames), ...S_ENCODE, "-y", out,
   ]);
