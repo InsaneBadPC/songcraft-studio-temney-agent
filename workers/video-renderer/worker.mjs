@@ -399,7 +399,7 @@ async function processJob(job) {
         }
         const best = await pickBest30s(audio).catch(() => 0);
         const clipStart = Math.max(0, best);
-        const segAudio = path.join(work, "audio30.mp3");
+        const segAudio = path.join(work, "audio30.m4a");
         await exec("ffmpeg", [
           "-y", "-ss", String(clipStart.toFixed(2)), "-t", "30",
           "-i", audio, "-c:a", "aac", "-b:a", "192k", segAudio,

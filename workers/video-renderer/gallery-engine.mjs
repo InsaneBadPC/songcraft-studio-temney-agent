@@ -636,23 +636,29 @@ export async function buildShortVideo(options) {
  * nejvyšším průměrem energie.
  */
 export async function pickBest30s(audioFile) {
-  const tmp = `/tmp/sas_${Date.now()}.wav`;
-  await ffmpeg(["-i", audioFile, "-ac", "1", "-ar", "8000", tmp]);
-  const { readFile: rf } = await import("node:fs/promises");
-  const data = await rf(tmp);
-  void tmp;
-  const samples = new Int16Array(data.buffer, data.byteOffset, Math.floor(data.byteLength / 2));
-  const sr = 8000;
-  const win = 30 * sr;
-  if (samples.length < win) return 0;
-  let best = -1, bestEnergy = -1;
-  for (let start = 0; start + win <= samples.length; start += sr) {
-    let e = 0;
-    for (let i = 0; i < win; i += 8) {
-      const v = samples[start + i];
-      e += v * v;
+  // temp jde vedle vstupu - na Androidu/VM je to jediná psací cesta.
+  const dir = path.dirname(audioFile);
+  const tmp = path.join(dir, `sas_${Date.now()}.wav`);
+  try {
+    await ffmpeg(["-i", audioFile, "-ac", "1", "-ar", "8000", tmp]);
+    const { readFile: rf, rm: rmf } = await import("node:fs/promises");
+    const data = await rf(tmp);
+    await rmf(tmp, { force: true });
+    const samples = new Int16Array(data.buffer, data.byteOffset, Math.floor(data.byteLength / 2));
+    const sr = 8000;
+    const win = 30 * sr;
+    if (samples.length < win) return 0;
+    let best = 0, bestEnergy = -1;
+    for (let start = 0; start + win <= samples.length; start += sr) {
+      let e = 0;
+      for (let i = 0; i < win; i += 8) {
+        const v = samples[start + i];
+        e += v * v;
+      }
+      if (e > bestEnergy) { bestEnergy = e; best = start; }
     }
-    if (e > bestEnergy) { bestEnergy = e; best = start; }
+    return best / sr;
+  } catch {
+    return 0;
   }
-  return best / sr;
 }
