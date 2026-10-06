@@ -34,7 +34,7 @@ const COVER_SECONDS = 3;
 /** Které režimy se schovají pod hlavní kartou „Video s více médii". */
 const GALLERY_IDS: VideoTabMode[] = ["gallery_images", "gallery_videos", "gallery_mixed"];
 
-type Step = "mode" | "song" | "running";
+type Step = "format" | "mode" | "song" | "running";
 
 export default function VideosScreen() {
   const colors = useColors();
@@ -42,7 +42,8 @@ export default function VideosScreen() {
   const { isAuthenticated, loading } = useAuth();
   const snapshot = trpc.studio.snapshot.useQuery(undefined, { enabled: isAuthenticated });
 
-  const [step, setStep] = useState<Step>("mode");
+  const [step, setStep] = useState<Step>("format");
+  const [format, setFormat] = useState<"full" | "shorts">("full");
   const [modeId, setModeId] = useState<VideoTabMode>("album_cover_intro");
   const [effect, setEffect] = useState<CenterEffect>("breathe");
   const [songId, setSongId] = useState<string | null>(null);
@@ -180,7 +181,8 @@ useEffect(() => {
           songId: targetSongId,
           versionId: version.id,
           mode: modeId,
-          centerEffect: modeId === "album_cover_intro" ? effect : null,
+          centerEffect: modeId === "album_cover_intro" && format === "full" ? effect : null,
+          aspect: format === "shorts" ? "9:16" : "16:9",
         });
         if (initial.status === "failed") throw new Error(initial.error);
         if (initial.status === "completed") {
@@ -218,7 +220,7 @@ useEffect(() => {
         );
       }
     },
-    [createRender, effect, finalVersionFor, loadJobs, modeId],
+    [createRender, effect, finalVersionFor, loadJobs, modeId, format],
   );
 
   const downloadJob = useCallback(async (job: StudioVideoJob) => {
@@ -256,6 +258,65 @@ useEffect(() => {
           text="Přihlas se, aby se načetly skladby, jejich finální MP3 a doprovodná média."
           action={<PrimaryButton label="Přihlásit se" icon="login" onPress={() => void startPrivateLogin()} />}
         />
+      </ScreenContainer>
+    );
+  }
+
+  // ---------------------------------------------------------------- krok 0: volba formátu
+  if (step === "format") {
+    return (
+      <ScreenContainer className="px-5">
+        <ScrollView
+          showsVerticalScrollIndicator={false}
+          contentContainerStyle={[styles.content, { paddingBottom: insets.bottom + 96 }]}
+        >
+          <View style={styles.stack}>
+            <StudioHeader eyebrow="Tvorba videa" title="Videa" />
+            <Text style={[Type.body, styles.intro, { color: colors.muted }]}>
+              Jaké video pro skladby udělat?
+            </Text>
+
+            <VideoModeCard
+              icon="movie"
+              label="Celé video"
+              detail="Video na celou píseni, na šířku 16:9"
+              selected={format === "full"}
+              onPress={() => setFormat("full")}
+            />
+            <VideoModeCard
+              icon="phone-iphone"
+              label="YouTube Shorts"
+              detail="Krátký 30s úsek na svislou píseň, 9:16"
+              selected={format === "shorts"}
+              onPress={() => setFormat("shorts")}
+            />
+
+            {format === "shorts" ? (
+              <View style={styles.panel}>
+                <Text style={[Type.caption, { color: colors.muted }]}>
+                  Shorts používá jen jednoduchý režim: obál alba 3 s, statický obrázek
+                  skladby, obál alba 3 s. Obrázek jde přes vertikální pozadí.
+                </Text>
+              </View>
+            ) : (
+              <View style={styles.panel}>
+                <Text style={[Type.caption, { color: colors.muted }]}>
+                  Vyber si typ videa — obrázek skladby s efektem, galerie obrázků,
+                  smyčka z videí nebo kombinované.
+                </Text>
+              </View>
+            )}
+
+            <PrimaryButton
+              label={`Pokračovat · ${format === "shorts" ? "Shorts" : "Celé video"}`}
+              icon="arrow-forward"
+              onPress={() => {
+                if (format === "shorts") setModeId("album_cover_intro");
+                setStep("mode");
+              }}
+            />
+          </View>
+        </ScrollView>
       </ScreenContainer>
     );
   }
@@ -371,36 +432,40 @@ useEffect(() => {
                 </View>
               ) : null}
 
-              {/* Typ 2: video s více médii */}
-              <View style={styles.spacer} />
-              <VideoModeCard
-                icon={galleryEntry.icon}
-                label="Video s více médii"
-                detail="Víc obrázků, smyčka z videí nebo obojí dohromady"
-                selected={GALLERY_IDS.includes(modeId)}
-                expanded={galleryOpen}
-                onPress={() => {
-                  const next = !galleryOpen;
-                  setGalleryOpen(next);
-                  if (next) setModeId(galleryGroup[0].id as VideoTabMode);
-                }}
-              />
+              {/* Typ 2: video s více médii - pro Shorts nenabízíme */}
+              {format === "shorts" ? null : (
+                <>
+                  <View style={styles.spacer} />
+                  <VideoModeCard
+                    icon={galleryEntry.icon}
+                    label="Video s více médii"
+                    detail="Víc obrázků, smyčka z videí nebo obojí dohromady"
+                    selected={GALLERY_IDS.includes(modeId)}
+                    expanded={galleryOpen}
+                    onPress={() => {
+                      const next = !galleryOpen;
+                      setGalleryOpen(next);
+                      if (next) setModeId(galleryGroup[0].id as VideoTabMode);
+                    }}
+                  />
 
-              {galleryOpen ? (
-                <View style={styles.subgroup}>
-                  {galleryGroup.map((entry) => (
-                    <VideoModeCard
-                      key={entry.id}
-                      nested
-                      icon={entry.icon}
-                      label={entry.label}
-                      detail={entry.detail}
-                      selected={modeId === entry.id}
-                      onPress={() => setModeId(entry.id as VideoTabMode)}
-                    />
-                  ))}
-                </View>
-              ) : null}
+                  {galleryOpen ? (
+                    <View style={styles.subgroup}>
+                      {galleryGroup.map((entry) => (
+                        <VideoModeCard
+                          key={entry.id}
+                          nested
+                          icon={entry.icon}
+                          label={entry.label}
+                          detail={entry.detail}
+                          selected={modeId === entry.id}
+                          onPress={() => setModeId(entry.id as VideoTabMode)}
+                        />
+                      ))}
+                    </View>
+                  ) : null}
+                </>
+              )}
 
               {GALLERY_IDS.includes(modeId) ? (
                 <View style={styles.panel}>

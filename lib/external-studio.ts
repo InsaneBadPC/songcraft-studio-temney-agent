@@ -349,6 +349,8 @@ export async function createVideoTabRender(input: {
   versionId: string;
   mode: VideoTabMode;
   centerEffect?: CenterEffect | null;
+  aspect?: "16:9" | "9:16";
+  shortBackgroundPath?: string | null;
 }) {
   const { data, error } = await supabase.functions.invoke("songcraft-youtube", {
     body: {
@@ -358,6 +360,8 @@ export async function createVideoTabRender(input: {
       effect: "static",
       mode: input.mode,
       ...(input.centerEffect ? { centerEffect: input.centerEffect } : {}),
+      ...(input.aspect ? { aspect: input.aspect } : {}),
+      ...(input.shortBackgroundPath ? { shortBackgroundPath: input.shortBackgroundPath } : {}),
     },
   });
   return assert(data, error) as ExternalYoutubeVideo;

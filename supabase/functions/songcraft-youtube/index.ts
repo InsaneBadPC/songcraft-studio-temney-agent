@@ -43,7 +43,7 @@ Deno.serve(async (request) => {
   if (authError || !user) return json({ error: "Neplatné přihlášení." }, 401);
   if (!isAllowedPrivateUser(user, { allowedUserIds: Deno.env.get("SONGCRAFT_ALLOWED_USER_IDS") ?? undefined, allowedEmails: Deno.env.get("SONGCRAFT_ALLOWED_EMAILS") ?? undefined })) return json({ error: privateAccessMessage() }, 403);
   const admin = createClient(url, serviceKey);
-  const input = await request.json().catch(() => null) as { action?: unknown; songId?: unknown; versionId?: unknown; effect?: unknown; mode?: unknown; galleryKind?: unknown; centerEffect?: unknown; jobId?: unknown } | null;
+  const input = await request.json().catch(() => null) as { action?: unknown; songId?: unknown; versionId?: unknown; effect?: unknown; mode?: unknown; galleryKind?: unknown; centerEffect?: unknown; jobId?: unknown; aspect?: unknown; shortBackgroundPath?: unknown } | null;
 
   if (input?.action === "check") {
     if (typeof input.jobId !== "string" || !uuid.test(input.jobId)) return json({ error: "Neplatné jobId." }, 400);
@@ -132,17 +132,23 @@ Deno.serve(async (request) => {
     }
   }
   const renderPrompt = `SongCraft video mode: ${mode}. Song: ${clip(song.title, 140)}. Style: ${clip(song.style_prompt, 600)}. Lyrics/context: ${clip(song.lyrics, 2_400)}. Legacy effect: ${effect}.`;
+  // Aspect se drží na jobu a worker ho použije k výběru 1280x720 vs 1080x1920.
+  const aspect = input.aspect === "9:16" ? "9:16" : "16:9";
   const { data: job, error: createError } = await admin.from("agent_videos").insert({
     user_id: user.id,
     song_id: song.id,
     type: mode,
     mode,
     backend,
+    aspect,
     audio_storage_path: audioPath,
     prompt_used: renderPrompt,
     cover_lead_path: coverLeadPath,
     ...(centerEffect ? { center_effect: centerEffect } : {}),
     ...(galleryKind ? { gallery_kind: galleryKind } : {}),
+    ...(typeof input.shortBackgroundPath === "string" && input.shortBackgroundPath
+      ? { short_background_path: ownedPath(user.id, input.shortBackgroundPath) }
+      : {}),
     render_status: "queued",
   }).select("id,render_status,mode,backend").single();
   if (createError || !job) return json({ error: "Renderovací úlohu se nepodařilo založit." }, 502);

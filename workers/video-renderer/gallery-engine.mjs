@@ -494,3 +494,165 @@ export async function buildSongCoverVideo(options) {
   await rm(staged, { force: true });
   return { duration: finalDuration, clips: clips.length, frames: madeFrames, effect: chosen, variant };
 }
+
+// ---------------------------------------------------------------------------
+// YouTube Shorts (9:16)
+//
+// Krátké vejší video: obál alba 3 s -> <celý obrázek skladby> -> obál alba 3 s.
+// Obrázek skladby i obál alba se do rámu vejdou celé - necropam je, jen je
+// zmenšíme a vystředíme, a volné místo zaplníme pozadím, které uživatel dodal.
+
+const S_W = 1080;
+const S_H = 1920;
+
+const S_ENCODE = [
+  "-c:v", "libx264", "-preset", "veryfast", "-crf", "20", "-pix_fmt", "yuv420p",
+  "-r", String(FPS), "-g", String(FPS * 2), "-keyint_min", String(FPS),
+  "-sc_threshold", "0", "-an",
+];
+
+/** Obrázek zaplní 1080x1920 pozadí (crop, bez černých pruhů). */
+async function shortBackgroundClip(bg, seconds, out) {
+  const frames = Math.max(1, Math.round(seconds * FPS));
+  const graph = `[0:v]scale=${S_W}:${S_H}:force_original_aspect_ratio=increase,`
+    + `crop=${S_W}:${S_H},setsar=1,format=yuv420p[v]`;
+  await ffmpeg([
+    "-threads", THREADS, "-loop", "1", "-framerate", String(FPS), "-i", bg,
+    "-filter_complex", graph, "-map", "[v]",
+    "-frames:v", String(frames), ...S_ENCODE, "-y", out,
+  ]);
+  return frames;
+}
+
+/**
+ * Obrázek (album nebo skladba) se celý vejde do 1080x1920: zmenšíme ho,
+ * vystředíme a po stranách (nahoře/dole) ho obložíme rozmazaným zvětšeným
+ * pozadím. Tím je obál vždy celý viditelný a okolí není černé.
+ */
+async function shortContentClip(src, bg, seconds, out) {
+  const frames = Math.max(1, Math.round(seconds * FPS));
+  // Pozadí (tall vertical obrázek) zabere celý 1080x1920, hlavní obsah
+  // (obál alba nebo obrázek skladby) se celý vejde do středu a vystředí se.
+  const graph =
+    `[0:v]scale=${S_W}:${S_H}:force_original_aspect_ratio=increase,`
+    + `crop=${S_W}:${S_H},setsar=1,format=yuv420p[bg];`
+    + `[1:v]scale=${S_W}:${S_H}:force_original_aspect_ratio=decrease,`
+    + `format=yuv420p[f];`
+    + `[bg][f]overlay=(W-w)/2:(H-h)/2,format=yuv420p[v]`;
+  await ffmpeg([
+    "-threads", THREADS, "-loop", "1", "-framerate", String(FPS), "-i", bg,
+    "-loop", "1", "-framerate", String(FPS), "-i", src,
+    "-filter_complex", graph, "-map", "[v]",
+    "-frames:v", String(frames), ...S_ENCODE, "-y", out,
+  ]);
+  return frames;
+}
+
+/**
+ * Vyrobí vertikální Shorts z obrázku skladby a obalu alba.
+ *
+ *   [obál alba 3 s] -> [obrázek skladby, bez efektu] -> [obál alba 3 s]
+ *
+ * V pozadí za obrázky je vyplněný obrázek, který dodejme sami (nebo rozmazaný
+ * obál, když vydaný obrázek chybí). аудио se přikládá až v závěru.
+ */
+export async function buildShortVideo(options) {
+  const {
+    audio, cover, songCover, out, workDir, onProgress = () => {},
+    background = null, // obrázek, který zaplní volná místa
+    coverLeadSeconds = COVER_LEAD_SECONDS,
+    coverTailSeconds = COVER_TAIL_SECONDS,
+  } = options;
+
+  if (!audio) throw new Error("Shorts vyžadují audio");
+  if (!cover) throw new Error("Shorts vyžadují obál alba");
+  if (!songCover) throw new Error("Shorts vyžadují obrázek skladby");
+
+  await mkdir(workDir, { recursive: true });
+  const duration = await probeDuration(audio);
+  const lead = Math.min(coverLeadSeconds, duration / 3);
+  const tail = Math.min(coverTailSeconds, Math.max(0, duration - lead));
+  const body = Math.max(0, duration - lead - tail);
+  onProgress(`shorts ${duration.toFixed(2)} s · obál ${lead}s + obrázek skladby ${body.toFixed(2)}s + obál ${tail}s`);
+
+  const clips = [];
+  const totalFrames = Math.max(1, Math.round(duration * FPS));
+  let madeFrames = 0;
+
+  const bgSource = background || cover;
+  const addCover = async (seconds, tag) => {
+    const remaining = totalFrames - madeFrames;
+    if (remaining <= 0) return;
+    const want = Math.min(Math.round(seconds * FPS), remaining);
+    const file = path.join(workDir, `${tag}.mp4`);
+    await shortContentClip(cover, bgSource, want / FPS, file);
+    madeFrames += want;
+    clips.push(file);
+    onProgress(`  obál alba ${tag}: ${(want / FPS).toFixed(2)} s`);
+  };
+
+  await addCover(lead, "cover-lead");
+
+  if (body > 0.05) {
+    const want = Math.min(Math.round(body * FPS), totalFrames - madeFrames);
+    const file = path.join(workDir, "song-center.mp4");
+    await shortContentClip(songCover, bgSource, want / FPS, file);
+    madeFrames += want;
+    clips.push(file);
+    onProgress(`  obrázek skladby: ${(want / FPS).toFixed(2)} s`);
+  }
+
+  await addCover(tail, "cover-tail");
+
+  const manifest = path.join(workDir, "concat.txt");
+  await writeFile(manifest, `${clips.map((f) => `file '${path.resolve(f).replace(/'/g, "'\\''")}'`).join("\n")}\n`, "utf8");
+
+  const staged = path.join(workDir, "silent.mp4");
+  await ffmpeg([
+    "-threads", THREADS, "-f", "concat", "-safe", "0", "-i", manifest,
+    "-c:v", "copy", "-an", "-y", staged,
+  ]);
+
+  await ffmpeg([
+    "-threads", THREADS, "-i", staged, "-i", audio,
+    "-map", "0:v:0", "-map", "1:a:0",
+    "-c:v", "copy", "-c:a", "aac", "-b:a", "192k",
+    "-shortest", "-movflags", "+faststart", "-y", out,
+  ]);
+
+  const finalDuration = await probeDuration(out);
+  onProgress(`hotovo: ${finalDuration.toFixed(2)} s · ${clips.length} klipů`);
+  if (Math.abs(finalDuration - duration) > 1.0) {
+    onProgress(`POZOR: výstup ${finalDuration.toFixed(2)} s, očekáváno ${duration.toFixed(2)} s`);
+  }
+  for (const f of clips) await rm(f, { force: true });
+  await rm(staged, { force: true });
+  return { duration: finalDuration, clips: clips.length };
+}
+
+/**
+ * Najde start sekund, od kterého je nejenergičtější 30sekundové okno.
+ * Vrátí start v sekundách z začátku audio. Jednoduché, bez ML: okno s
+ * nejvyšším průměrem energie.
+ */
+export async function pickBest30s(audioFile) {
+  const tmp = `/tmp/sas_${Date.now()}.wav`;
+  await ffmpeg(["-i", audioFile, "-ac", "1", "-ar", "8000", tmp]);
+  const { readFile: rf } = await import("node:fs/promises");
+  const data = await rf(tmp);
+  void tmp;
+  const samples = new Int16Array(data.buffer, data.byteOffset, Math.floor(data.byteLength / 2));
+  const sr = 8000;
+  const win = 30 * sr;
+  if (samples.length < win) return 0;
+  let best = -1, bestEnergy = -1;
+  for (let start = 0; start + win <= samples.length; start += sr) {
+    let e = 0;
+    for (let i = 0; i < win; i += 8) {
+      const v = samples[start + i];
+      e += v * v;
+    }
+    if (e > bestEnergy) { bestEnergy = e; best = start; }
+  }
+  return best / sr;
+}

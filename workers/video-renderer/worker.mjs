@@ -39,7 +39,7 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import path from "node:path";
 import { buildLoopVideo } from "./loop-engine.mjs";
-import { buildGalleryVideo, buildSongCoverVideo } from "./gallery-engine.mjs";
+import { buildGalleryVideo, buildShortVideo, buildSongCoverVideo, pickBest30s } from "./gallery-engine.mjs";
 
 /**
  * Režimy tabu Videa a odkud berou scény.
@@ -369,27 +369,74 @@ async function processJob(job) {
     if (type === SONG_COVER_MODE) {
       // === album_cover_intro: obál alba, obrázek skladby s efektem, obál alba ===
       //
-      // [obál alba 3 s] -> [obrázek skladby, dýchání/parallax/kroky] -> [obál alba 3 s]
-      //
-      // artwork je obál (cover_lead_path = obál alba, jinak obál skladby).
-      // songCover je sc_songs.cover_path, to je ta druhá věc.
-      if (!songCoverStoragePath) {
-        throw new Error("K této skladbě není nahrán obrázek skladby.");
+      // Shorts (job.aspect === "9:16"): ten samý formát, ale vertikální 1080x1920,
+      // pokračuje jen 30s z nejlepšího úseku skladby a obraz jde přes vertikální
+      // pozadí, které uživatel dodal jako soubor.
+      if (job.aspect === "9:16") {
+        // Najdeme 30s nejsilnější úsek skladby - to je „simple shorts" režim.
+        const songCoverRaw = path.join(work, "songcover.raw");
+        await download(await signed(songCoverStoragePath), songCoverRaw);
+        const songCover = path.join(work, `songcover.${sniffImageExtension(await readFile(songCoverRaw))}`);
+        if (songCover !== songCoverRaw) await writeFile(songCover, await readFile(songCoverRaw));
+        await rm(songCoverRaw, { force: true });
+
+        // statické pozadí z dodaného souboru, jinak tmavý rozmazaný obál.
+        // Shorts vždy dostane vertikální filler, který uživatel nahrál do bucketu.
+        const bgPath = typeof job.short_background_path === "string" && job.short_background_path
+          ? ownedPath(job.user_id, job.short_background_path)
+          : ownedPath(job.user_id, `${job.user_id}/covers/short-bg.png`);
+        let bg = null;
+        if (bgPath) {
+          try {
+            const bgRaw = path.join(work, "bg.raw");
+            await download(await signed(bgPath), bgRaw);
+            bg = path.join(work, `bg.${sniffImageExtension(await readFile(bgRaw))}`);
+            if (bg !== bgRaw) await writeFile(bg, await readFile(bgRaw));
+            await rm(bgRaw, { force: true });
+          } catch {
+            bg = null; // pozadí nedostupné -> tmavý rozmazaný obál alba
+          }
+        }
+        const best = await pickBest30s(audio).catch(() => 0);
+        const clipStart = Math.max(0, best);
+        const segAudio = path.join(work, "audio30.mp3");
+        await exec("ffmpeg", [
+          "-y", "-ss", String(clipStart.toFixed(2)), "-t", "30",
+          "-i", audio, "-c:a", "aac", "-b:a", "192k", segAudio,
+        ]);
+        const result = await buildShortVideo({
+          audio: segAudio, cover: artwork, songCover, out: output,
+          workDir: path.join(work, "short"),
+          background: bg,
+          onProgress: (line) => { console.log(`[${job.id}] ${line}`); void refreshLease(job.id, job.user_id); },
+        });
+        await assertPlayableVideo(output);
+        console.log(`[ready] ${job.id} (${SONG_COVER_MODE}, shorts 9:16, ${result.duration.toFixed(2)} s)`);
+      } else {
+        // === album_cover_intro: obál alba, obrázek skladby s efektem, obál alba ===
+        //
+        // [obál alba 3 s] -> [obrázek skladby, dýchání/parallax/kroky] -> [obál alba 3 s]
+        //
+        // artwork je obál (cover_lead_path = obál alba, jinak obál skladby).
+        // songCover je sc_songs.cover_path, to je ta druhá věc.
+        if (!songCoverStoragePath) {
+          throw new Error("K této skladbě není nahrán obrázek skladby.");
+        }
+        const centerRaw = path.join(work, "songcover.raw");
+        await download(await signed(songCoverStoragePath), centerRaw);
+        const songCover = path.join(work, `songcover.${sniffImageExtension(await readFile(centerRaw))}`);
+        if (songCover !== centerRaw) await writeFile(songCover, await readFile(centerRaw));
+        await rm(centerRaw, { force: true });
+        const effect = CENTER_EFFECTS.includes(job.center_effect) ? job.center_effect : "breathe";
+        const result = await buildSongCoverVideo({
+          audio, cover: artwork, songCover, out: output,
+          workDir: path.join(work, "songcover"),
+          effect, seed: String(job.id),
+          onProgress: (line) => { console.log(`[${job.id}] ${line}`); void refreshLease(job.id, job.user_id); },
+        });
+        await assertPlayableVideo(output);
+        console.log(`[ready] ${job.id} (${SONG_COVER_MODE}, ${result.effect}, ${result.duration.toFixed(2)} s)`);
       }
-      const centerRaw = path.join(work, "songcover.raw");
-      await download(await signed(songCoverStoragePath), centerRaw);
-      const songCover = path.join(work, `songcover.${sniffImageExtension(await readFile(centerRaw))}`);
-      if (songCover !== centerRaw) await writeFile(songCover, await readFile(centerRaw));
-      await rm(centerRaw, { force: true });
-      const effect = CENTER_EFFECTS.includes(job.center_effect) ? job.center_effect : "breathe";
-      const result = await buildSongCoverVideo({
-        audio, cover: artwork, songCover, out: output,
-        workDir: path.join(work, "songcover"),
-        effect, seed: String(job.id),
-        onProgress: (line) => { console.log(`[${job.id}] ${line}`); void refreshLease(job.id, job.user_id); },
-      });
-      await assertPlayableVideo(output);
-      console.log(`[ready] ${job.id} (${SONG_COVER_MODE}, ${result.effect}, ${result.duration.toFixed(2)} s)`);
     } else if (GALLERY_MODES[type]) {
       // === větev E: skládání z doprovodných médií jedné písně ===
       //
@@ -545,7 +592,7 @@ async function tick() {
   // gallery_kind, cover_lead_path, center_effect a source_video_path MUSÍ být
 // v seznamu. Dřív tu chyběly, takže job.galleryKind i job.source_video_path byly
 // undefined a renderer si vždy bral všechno, i když uživatel vybral jen obrázky.
-const jobs = await request(api("agent_videos", "?select=id,user_id,song_id,type,mode,backend,prompt_used,attempt_count,max_attempts,lease_expires_at,audio_storage_path,aspect,gallery_kind,cover_lead_path,center_effect,source_video_path&render_status=eq.queued&order=created_at.asc&limit=1"));
+const jobs = await request(api("agent_videos", "?select=id,user_id,song_id,type,mode,backend,prompt_used,attempt_count,max_attempts,lease_expires_at,audio_storage_path,aspect,gallery_kind,cover_lead_path,center_effect,source_video_path,short_background_path&render_status=eq.queued&order=created_at.asc&limit=1"));
   const job = jobs?.[0]; if (!job) return;
   const attempt = Number(job.attempt_count || 0) + 1;
   const maxAttempts = Number(job.max_attempts || 3);

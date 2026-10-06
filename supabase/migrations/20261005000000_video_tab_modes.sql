@@ -50,6 +50,15 @@ alter table public.agent_videos
 comment on column public.agent_videos.center_effect is
   'Efekt na obrázku skladby pro mode=album_cover_intro: breathe | parallax | steps, null = breathe.';
 
+-- Vertikální pozadí pro Shorts (1080x1920). Uživatel ho dodává jako soubor;
+-- worker ho použije jako filler kolem vejšího obalu alba / obrázku skladby.
+-- NULL znamená, že se použije tmavý rozmazaný obál.
+alter table public.agent_videos
+  add column if not exists short_background_path text;
+
+comment on column public.agent_videos.short_background_path is
+  'Volitelná cesta k pozadí pro 9:16 Shorts, jinak tmavý rozmazaný obál.';
+
 -- ---------------------------------------------------------------------------
 -- 2. Nové kanonické režimy
 --
