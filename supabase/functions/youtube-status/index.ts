@@ -56,62 +56,108 @@ Deno.serve(async (request) => {
     });
   }
 
-  // Titul kanálu si vezmeme z API, uložený je jen číselný ID. Access token po
-  // hodině vyprchá, takže nejdřív zkusíme obnovit ho z refresh tokenu. Bez toho
-  // by UI ukázalo „YouTube kanál" místo skutečného názvu, i když je vše v pořádku.
-  let channelTitle = "YouTube kanál";
-  try {
-    const { data: credential } = await admin
-      .from("youtube_credentials")
-      .select("access_token,refresh_token,expires_at")
-      .eq("user_id", user.id)
-      .maybeSingle();
-    let access = credential?.access_token;
-    const expired = !credential?.expires_at || new Date(credential.expires_at).getTime() < Date.now() + 60_000;
-    if (expired && credential?.refresh_token) {
-      const clientId = Deno.env.get("YOUTUBE_CLIENT_ID");
-      const clientSecret = Deno.env.get("YOUTUBE_CLIENT_SECRET");
-      if (clientId && clientSecret) {
-        const refreshed = await fetch("https://oauth2.googleapis.com/token", {
-          method: "POST",
-          headers: { "Content-Type": "application/x-www-form-urlencoded" },
-          body: new URLSearchParams({
-            client_id: clientId,
-            client_secret: clientSecret,
-            refresh_token: credential.refresh_token,
-            grant_type: "refresh_token",
-          }),
-        });
-        if (refreshed.ok) {
-          const payload = await refreshed.json();
-          access = payload.access_token;
-          await admin
-            .from("youtube_credentials")
-            .update({
-              access_token: payload.access_token,
-              expires_at: new Date(Date.now() + Number(payload.expires_in ?? 3600) * 1000).toISOString(),
-            })
-            .eq("user_id", user.id);
-        }
-      }
-    }
-    if (access) {
-      const response = await fetch("https://www.googleapis.com/youtube/v3/channels?part=snippet&mine=true", {
-        headers: { Authorization: `Bearer ${access}` },
+  // Tady to bylo fail-open a to byl důvod, proč se kanál nedal připojit znovu:
+  // jakmile v tabulce existoval jakýkoliv řádek, funkce vrátila connected: true,
+  // i kdyby Google token dávno odmítl. Aplikace pak ukázala zelenou kartu
+  // „Připojeno. Nahrávání i publikace fungují" a tlačítko „Připojit YouTube
+  // OAuth" vůbec nevykreslila - nebylo se kam kliknout.
+  //
+  // Fail-closed: „připojené" znamená, že jsem tokenem opravdu dostal odpověď
+  // od YouTube. Když to nedokážu, řeknu to a vrátím důvod.
+  //
+  // Důvody, které Google vrací:
+  //   invalid_grant - token byl odmítnut nebo odvolán (nejčastěji consent
+  //                  screen v režimu Testing, který Google zruší po 7 dnech)
+  //   401/403 na channels API - token prošel, ale nesmí tenhle kanál
+  const { data: credential } = await admin
+    .from("youtube_credentials")
+    .select("access_token,refresh_token,expires_at")
+    .eq("user_id", user.id)
+    .maybeSingle();
+
+  let bearer = credential?.access_token ?? null;
+  const expired = !credential?.expires_at ||
+    new Date(credential.expires_at).getTime() < Date.now() + 60_000;
+
+  if (expired) {
+    const clientId = Deno.env.get("YOUTUBE_CLIENT_ID");
+    const clientSecret = Deno.env.get("YOUTUBE_CLIENT_SECRET");
+    if (!credential?.refresh_token) {
+      return json({
+        connected: false,
+        message: "Uložený přihlašovací údaj nemá čím obnovit práva. Kanál připoj znovu.",
       });
-      if (response.ok) {
-        const payload = await response.json();
-        channelTitle = payload?.items?.[0]?.snippet?.title ?? channelTitle;
-      }
     }
+    if (!clientId || !clientSecret) {
+      return json({ connected: false, message: "Chybí konfigurace Google klíče. Kanál připoj znovu." });
+    }
+    const refreshed = await fetch("https://oauth2.googleapis.com/token", {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({
+        client_id: clientId,
+        client_secret: clientSecret,
+        refresh_token: credential.refresh_token,
+        grant_type: "refresh_token",
+      }),
+      signal: AbortSignal.timeout(15_000),
+    });
+    if (!refreshed.ok) {
+      const reason = (await refreshed.json().catch(() => null))?.error ?? `HTTP ${refreshed.status}`;
+      if (reason === "invalid_grant") {
+        return json({
+          connected: false,
+          code: "token_revoked",
+          message:
+            "Google odmítl obnovit oprávnění, souhlas byl odvolán nebo vypršel. V Google Cloud přepni OAuth consent screen z režimu Testing na Production a pak kanál připoj znovu - jinak token umře zase po sedmi dnech.",
+        });
+      }
+      return json({ connected: false, message: `Google oprávnění neobnovil (${reason}). Zkus to prosím znovu.` });
+    }
+    const payload = await refreshed.json();
+    bearer = payload.access_token ?? null;
+    await admin
+      .from("youtube_credentials")
+      .update({
+        access_token: payload.access_token,
+        expires_at: new Date(Date.now() + Number(payload.expires_in ?? 3600) * 1000).toISOString(),
+      })
+      .eq("user_id", user.id);
+  }
+
+  if (!bearer) {
+    return json({ connected: false, message: "Oprávnění k kanálu nejsou k dispozici. Připoj kanál znovu." });
+  }
+
+  // Důkaz, že token fakt funguje. Titul kanálu vezmeme ze stejné odpovědi.
+  let channelTitle = "YouTube kanál";
+  let channelResponse: Response;
+  try {
+    channelResponse = await fetch(
+      "https://www.googleapis.com/youtube/v3/channels?part=snippet&mine=true",
+      { headers: { Authorization: `Bearer ${bearer}` }, signal: AbortSignal.timeout(15_000) },
+    );
   } catch {
-    // titul je kosmetika, stav připojení je podstatný
+    return json({ connected: false, message: "YouTube neodpověděl. Zkus to prosím znovu." });
+  }
+  if (!channelResponse.ok) {
+    return json({
+      connected: false,
+      message: channelResponse.status === 401 || channelResponse.status === 403
+        ? "Oprávnění k kanálu už neplatí. Připoj kanál znovu."
+        : `YouTube vrátil ${channelResponse.status}. Zkus to prosím znovu.`,
+    });
+  }
+  const payload = await channelResponse.json().catch(() => null);
+  const resolved = payload?.items?.[0];
+  if (!resolved?.id) {
+    return json({ connected: false, message: "YouTube nevrátil žádný kanál. Připoj kanál znovu." });
   }
 
   return json({
     connected: true,
-    channelId: data.channel_id,
-    channelTitle,
+    channelId: resolved.id,
+    channelTitle: resolved.snippet?.title ?? channelTitle,
     connectedAt: data.updated_at,
   });
 });

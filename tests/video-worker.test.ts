@@ -111,6 +111,47 @@ describe("Oracle video worker contract", () => {
     expect(readFileSync("lib/external-studio.ts", "utf8")).toContain('invoke("youtube-status", { method: "GET" })');
   });
 
+  // Regrese 8. 10. 2026: youtube-status vracelo connected: true, jakmile v
+  // tabulce byl ANY row. Kdyz Google odmítl obnovit prava (invalid_grant),
+  // appka ukazala "Nahravani i publikace funguji" a tlacitko "Pripojit YouTube
+  // OAuth" vubec nevykreslila - nebylo se kam kliknout a kanal se nedal
+  // pripojit znovu. Ted je to fail-closed: "pripojene" znamena, ze tokenem
+  // opravdu dostala odpoved od YouTube.
+  it("youtube-status je fail-closed, ne pinda jen na existenci radku", () => {
+    const raw = readFileSync("supabase/functions/youtube-status/index.ts", "utf8");
+    // komentáře nepočítáme - popisují to samé (jen celořádkové, aby se nesahalo na // uvnitr URL)
+    const fn = raw.split("\n").map((l) => (l.trimStart().startsWith("//") ? "" : l)).join("\n");
+    // jediny connected: true je az za overenim odpovedi od YouTube
+    const trues = [...fn.matchAll(/connected:\s*true/g)];
+    expect(trues, "connected: true smi byt jen jednou").toHaveLength(1);
+    const trueAt = fn.indexOf("connected: true");
+    const proofAt = Math.max(
+      fn.indexOf("oauth2.googleapis.com/token"),
+      fn.indexOf("youtube/v3/channels"),
+    );
+    expect(proofAt, "chybi overeni tokenu").toBeGreaterThan(-1);
+    expect(trueAt, "connected: true pred overenim tokenu").toBeGreaterThan(proofAt);
+    // odmítnutý token musí skončit connected: false, ne tichým connected: true
+    expect(fn).toContain("invalid_grant");
+    expect(fn).toContain("token_revoked");
+    expect(fn).toContain('reason === "invalid_grant"');
+    // a nesmí se tím vrátit žádný citlivý údaj
+    for (const m of fn.matchAll(/json\(\s*\{([\s\S]*?)\}/g)) {
+      expect(m[1]).not.toContain("refresh_token");
+      expect(m[1]).not.toContain("access_token");
+    }
+  });
+
+  it("youtube-status neni kosmetika: pripojeni se da znovu", () => {
+    const fn = readFileSync("supabase/functions/youtube-status/index.ts", "utf8");
+    const falses = [...fn.matchAll(/connected:\s*false/g)];
+    // radku v tabulce, chybi verifier, neplatny nebo odmity token, chybi kanal,
+    // YouTube neodpovida -> kazda z tech cest musi vratit connected: false
+    expect(falses.length, "malo cest, kde se hlasi nepripojeno").toBeGreaterThanOrEqual(4);
+    expect(fn).toContain("Kanál připoj znovu");
+    expect(fn).toContain("AbortSignal.timeout(15_000)");
+  });
+
   it("only knows render types the DB constraint allows", () => {
     const known = ['"static_cover"', '"image_animation"', '"full_scenes"', '"video_loop"'];
     for (const type of known) expect(worker).toContain(`type === ${type}`);
