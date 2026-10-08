@@ -105,7 +105,7 @@ async function prepareUpload(file) {
   const target = `${file}.upload.mp4`;
   await exec("ffmpeg", [
     "-y", "-i", file,
-    "-c:v", "libx264", "-preset", "veryfast", "-crf", "27", "-pix_fmt", "yuv420p",
+    "-c:v", "libx264", "-preset", "veryfast", "-crf", "32", "-pix_fmt", "yuv420p",
     "-c:a", "aac", "-b:a", "96k", "-movflags", "+faststart", target,
   ], { maxBuffer: 10 * 1024 * 1024 });
   const size = (await stat(target)).size;
@@ -451,12 +451,13 @@ async function processJob(job) {
       // kód: média se stáhla a zahodila, engine se nezavolal, pak se pokusil
       // nahrát output, který neexistuje.
       const mediaFilter = GALLERY_MODES[type];
-      const { data: rows, error: mediaError } = await request(
+      const rowsResult = await request(
         api("sc_song_media",
           `?select=id,kind,storage_path,scene_ms&song_id=eq.${encodeURIComponent(job.song_id)}`
           + `&user_id=eq.${encodeURIComponent(job.user_id)}&order=sort_order.asc`),
       );
-      if (mediaError) throw new Error(`media se nenačetla: ${mediaError.message}`);
+      const rows = Array.isArray(rowsResult) ? rowsResult : (rowsResult?.data ?? null);
+      if (!rows) throw new Error(`media se nenačetla: neočekávaný tvar odpovědi`);
       // Řád je z DB (sort_order) a engine ho NESMÍ přeházět. Dřívější kód
       // dělal [...images, ...videos], čímž zahodil pořadí nastavené tážením.
       const useRows = mediaFilter === "mixed"

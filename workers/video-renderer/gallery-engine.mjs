@@ -41,7 +41,7 @@ export const VIDEO_SCENE_MIN_SECONDS = 5;
 export const VIDEO_SCENE_MAX_SECONDS = 10;
 
 const ENCODE = [
-  "-c:v", "libx264", "-preset", "veryfast", "-crf", "20", "-pix_fmt", "yuv420p",
+  "-c:v", "libx264", "-preset", "veryfast", "-crf", "30", "-pix_fmt", "yuv420p",
   "-r", String(FPS), "-profile:v", "high", "-level", "4.1",
   "-g", String(FPS * 2), "-keyint_min", String(FPS), "-sc_threshold", "0", "-an",
 ];
@@ -506,7 +506,7 @@ const S_W = 1080;
 const S_H = 1920;
 
 const S_ENCODE = [
-  "-c:v", "libx264", "-preset", "veryfast", "-crf", "20", "-pix_fmt", "yuv420p",
+  "-c:v", "libx264", "-preset", "veryfast", "-crf", "29", "-pix_fmt", "yuv420p",
   "-r", String(FPS), "-g", String(FPS * 2), "-keyint_min", String(FPS),
   "-sc_threshold", "0", "-an",
 ];

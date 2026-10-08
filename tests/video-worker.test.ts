@@ -195,4 +195,43 @@ describe("Oracle video worker contract", () => {
     expect(shortClip).toContain("loop=loop=-1:size=1:start=0");
     expect(shortClip).not.toContain('"-loop", "1"');
   });
+
+  // Regrese 8. 10. 2026: request() vraci SUROVE JSON z odpovedi, ne obalku
+  // { data, error } - tak to chodi v celem tomhle workeru. Galerie ale psala
+  // `const { data: rows, error: mediaError } = await request(...)`, takze rows
+  // bylo vzdy undefined a mediaError vzdy undefined. Chyba se nevyvolala, radky
+  // se nevykreslily a engine dostal prazdne scény.
+  it("nerozbiji si data z PostgREST, request() vraci surove json", () => {
+    expect(worker).toContain("return response.status === 204 ? null : response.json()");
+    // nesmi se to nikde rozbalovat jako { data, error }
+    const bad = [...worker.matchAll(/const\s*\{\s*data\s*:\s*(\w+)\s*,\s*error\s*:\s*(\w+)\s*\}\s*=\s*await request\(/g)];
+    expect(bad.map((m) => `${m[1]}/${m[2]}`), "zbytek obalky { data, error } z request()").toEqual([]);
+    // galerie si tohle musi vyridit sama a rucit si tvar
+    expect(worker).toContain("Array.isArray(rowsResult)");
+    expect(worker).toContain("neočekávaný tvar odpovědi");
+  });
+
+  it("drzi vystup pod limitkem bucketu - CRF nesmi bezel vyborne kvality", () => {
+    // Regrese: gallery_videos padaly na "Upload failed 400 Payload too large".
+    // Bucket ma limit 50 MB, proto je CRF u vystupu zvednute - 20 delalo prilis
+    // velke soubory.
+    //
+    // Pozor: CRF 18 v workeru je MEZIKROK (krátky usek, ze kterého se pak skládá
+    // celé video), ten se nikdy neodesílá a kvalita v nem ma byt maximalni.
+    // Kontrolujeme proto jen místa, ze kterych opravdu vzniká soubor do bucketu.
+    const upload = worker.slice(worker.indexOf("async function prepareUpload"), worker.indexOf("async function processJob"));
+    const uploadCrf = Number(/"-crf",\s*"(\d+)"/.exec(upload)?.[1]);
+    expect(uploadCrf, "prepareUpload nema CRF").toBeGreaterThanOrEqual(28);
+
+    const galleryEncode = [...gallery.matchAll(/"-crf",\s*"(\d+)"/g)].map((m) => Number(m[1]));
+    expect(galleryEncode, "gallery ma mit dva kodovace (16:9 a 9:16)").toHaveLength(2);
+    for (const c of galleryEncode) {
+      expect(c, `CRF ${c} je moc nizke, soubory pretecou limit 50 MB`).toBeGreaterThanOrEqual(25);
+      expect(c, `CRF ${c} je moc vysoke, kvalita spadne`).toBeLessThanOrEqual(33);
+    }
+
+    // a pred uploadem se nesmi rezolut preskočit pres limit
+    expect(worker).toContain("Compressed video is still too large");
+    expect(worker).toContain("const target = `${file}.upload.mp4`");
+  });
 });
