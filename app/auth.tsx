@@ -12,6 +12,7 @@ const PRIVATE_ACCOUNTS = [
   { id: "temney", name: "Temney", email: "temney@songcraft.test", description: "Autor a hlavní studio" },
   { id: "dj-palacinka", name: "DJ Palačinka", email: "dj.palacinka@songcraft.test", description: "Vlastní soukromý prostor" },
   { id: "verca", name: "Verča", email: "verca@songcraft.test", description: "Vlastní soukromý prostor" },
+  { id: "wednesday", name: "Wednesday", email: "wednesday@songcraft.test", description: "Vlastní soukromý prostor" },
 ] as const;
 
 export default function AuthScreen() {
@@ -93,7 +94,7 @@ export default function AuthScreen() {
         <Pressable disabled={loading} onPress={() => void signIn()} style={({ pressed }) => [styles.primary, { backgroundColor: colors.primary, opacity: loading || pressed ? 0.68 : 1 }]}>
           <Text style={styles.primaryText}>{loading ? "Ověřuji…" : `Přihlásit se jako ${selectedAccount.name}`}</Text>
         </Pressable>
-        <Text style={[styles.note, { color: colors.muted }]}>Přístup je omezený na Temney, DJ Palačinka a Verču. Nové účty nelze vytvářet.</Text>
+        <Text style={[styles.note, { color: colors.muted }]}>Přístup je omezený na Temney, DJ Palačinku, Verču a Wednesday. Nové účty nelze vytvářet.</Text>
       </View>
     </ScreenContainer>
   );

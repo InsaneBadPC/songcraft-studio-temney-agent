@@ -7,6 +7,10 @@ const accounts = [
   { name: "Temney", email: "temney@songcraft.test", password: process.env.SONGCRAFT_TEMNEY_PASSWORD },
   { name: "DJ Palačinka", email: "dj.palacinka@songcraft.test", password: process.env.SONGCRAFT_DJ_PALACINKA_PASSWORD },
   { name: "Verča", email: "verca@songcraft.test", password: process.env.SONGCRAFT_VERCA_PASSWORD },
+  // jen když je heslo nastavené, jinak by živý test spadl
+  ...(process.env.SONGCRAFT_WEDNESDAY_PASSWORD
+    ? [{ name: "Wednesday", email: "wednesday@songcraft.test", password: process.env.SONGCRAFT_WEDNESDAY_PASSWORD }]
+    : []),
 ];
 
 const privateTables = ["sc_albums", "sc_lyrics", "sc_songs", "sc_audio_versions", "sc_rhyme_words"];
