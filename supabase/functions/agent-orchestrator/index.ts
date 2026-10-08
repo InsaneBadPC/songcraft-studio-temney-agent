@@ -340,6 +340,12 @@ const toolDefs = [
         videoId: { type: "string" },
         title: { type: "string" },
         scheduledAt: { type: "string" },
+        format: {
+          type: "string",
+          enum: ["video", "shorts"],
+          description:
+            "video = 16:9 do playlistu, shorts = 9:16. Bez toho se bere 16:9.",
+        },
       },
       required: ["songId"],
     },
@@ -1594,6 +1600,11 @@ function pendingOp(op: { id: string; kind: string; summary: string; token: strin
       "id,title,cover_path",
     );
     const requestedVideoId = clip(args.videoId, 80);
+    // 16:9 do playlistu, 9:16 na Shorts. Bez tohoto se vybralo prostě "nejnovější
+    // hotové video" a to klidně mohla být 30s svislá smyčka, nebo naopak - a pak
+    // se na kanálu objevilo statické video s obalem misto smycky uctu.
+    const wantsShorts = args.format === "shorts";
+    const wantedAspect = wantsShorts ? "9:16" : "16:9";
     let videoId = requestedVideoId;
     if (videoId) {
       await row(
@@ -1601,7 +1612,7 @@ function pendingOp(op: { id: string; kind: string; summary: string; token: strin
         "agent_videos",
         videoId,
         userId,
-        "id,song_id,render_status",
+        "id,song_id,render_status,aspect",
       );
     } else {
       const { data: readyVideo, error: readyError } = await admin.from(
@@ -1609,15 +1620,19 @@ function pendingOp(op: { id: string; kind: string; summary: string; token: strin
       ).select("id").eq("song_id", song.id).eq("user_id", userId).eq(
         "render_status",
         "ready",
-      ).order("created_at", { ascending: false }).limit(1);
+      ).eq("aspect", wantedAspect).order("created_at", { ascending: false }).limit(1);
       if (readyError) throw new Error(readyError.message);
       videoId = readyVideo?.[0]?.id ?? "";
     }
     if (!videoId) {
-      throw new Error("Před publikací je potřeba hotové video ve stavu ready.");
+      throw new Error(
+        wantsShorts
+          ? "Před publikací Shorts chybí hotové svislé video 9:16 ve stavu ready."
+          : "Před publikací chybí hotové video 16:9 ve stavu ready.",
+      );
     }
     const { data: video, error: videoError } = await admin.from("agent_videos")
-      .select("id,render_status,storage_path").eq("id", videoId).eq(
+      .select("id,render_status,storage_path,aspect").eq("id", videoId).eq(
         "song_id",
         song.id,
       ).eq("user_id", userId).maybeSingle();
@@ -1625,6 +1640,12 @@ function pendingOp(op: { id: string; kind: string; summary: string; token: strin
       videoError || !video || video.render_status !== "ready" ||
       !video.storage_path
     ) throw new Error("Video není připravené k vytvoření publikace.");
+    if (video.aspect !== wantedAspect) {
+      throw new Error(
+        `Zvolené video je ${video.aspect}, ale publikace chce ${wantedAspect}.`
+          + ` Nastav správně format, nebo zvol jiné hotové video.`,
+      );
+    }
     const suggested = typeof args.scheduledAt === "string" && args.scheduledAt
       ? args.scheduledAt
       : new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();

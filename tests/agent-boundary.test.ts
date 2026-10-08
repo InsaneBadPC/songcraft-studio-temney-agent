@@ -110,6 +110,19 @@ describe("agent and publication boundaries", () => {
     expect(ops).toContain("AbortError");
   });
 
+  it("pri publikaci vybira video podle formatu, ne \"nejnovejsi\"", () => {
+    // Regrese: vybral se prostě nejnovější hotový render skladby. Když se naposledy
+    // rendroval obal + statický obrázek, na kanále místo smyčky uctu vyšel statický
+    // obrazek. Shorts (9:16) navíc mohly vyjet jako hlavní video v playlistu.
+    const block = orchestrator.slice(
+      orchestrator.indexOf('if (name === "schedule_publication")'),
+      orchestrator.indexOf('"description"', orchestrator.indexOf('if (name === "schedule_publication")')),
+    );
+    expect(block).toContain('.eq("aspect", wantedAspect)');
+    expect(block).toContain('args.format === "shorts"');
+    expect(block).toContain("video.aspect !== wantedAspect");
+  });
+
   it("nasazuje youtube-status, jinak aplikace spadne na staré tlačítko", () => {
     // Seznam funkcí je ruční. Když nová funkce není v workflow, zůstane
     // nenasazená, appka ji nemůže volat a vrátí se k nefungujícímu tlačítku,
