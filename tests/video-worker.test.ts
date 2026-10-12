@@ -42,7 +42,9 @@ describe("Oracle video worker contract", () => {
     // dashboard vrací 16:9; pro 9:16 se musí výstup převést, jinak short v DB
     // tvrdí svislé a soubor je vodorovný
     expect(worker).toContain("fitToAspect");
-    expect(worker).toContain("pad=1080:1920");
+    // vycentrování, ne pad s černou - viz test níže, ta pad byla chyba
+    expect(worker).toContain("scale=1080:-2[fgv];");
+    expect(worker).toContain("overlay=(W-w)/2:(H-h)/2");
   });
 
   it("renders both video kinds with the loop engine", () => {
@@ -233,5 +235,32 @@ describe("Oracle video worker contract", () => {
     // a pred uploadem se nesmi rezolut preskočit pres limit
     expect(worker).toContain("Compressed video is still too large");
     expect(worker).toContain("const target = `${file}.upload.mp4`");
+  });
+
+  // Regrese 8.-9. 10. 2026: Shorts mel nahoře a dole černé pruhy místo
+  // pozadí. Příčina: `pad=...:color=black` vyplní prázdná místa NEPRŮHLEDNOU
+  // černou a ta se v overlay položí NAVRCH pozadí. Naměřeno na publikovaném
+  // videu yr0Db8Np8fM: průměr 0,0, rozptyl 0,00, maximum 0 na 69 % výšky.
+  it("svisle video nikdy nesklada na černou plochu", () => {
+    for (const [name, src] of [["worker", worker], ["loop-engine", engine], ["gallery", gallery]]) {
+      const code = src.split("\n").map((l) => l.trimStart().startsWith("//") ? "" : l).join("\n");
+      expect(code, `${name}: pad=color=black překrývá pozadí`).not.toMatch(/pad=[^;"]*color=black(?!@0)/);
+      expect(code, `${name}: 9:16 musí vycentrovat přes overlay`).toMatch(/overlay=\(W-w\)\/2:\(H-h\)\/2/);
+    }
+  });
+
+  it("pozadi pro Shorts ma kazdy typ videa, ne jen jeden rezim", () => {
+    const uses = worker.match(/resolveShortBackground\(job, work\)/g)?.length ?? 0;
+    expect(uses, "pozadi se resi jen pro nekolik vetvi").toBeGreaterThanOrEqual(4);
+    expect(worker).toContain("short_background_path");
+    expect(worker).toContain("covers/short-bg.png");
+    // chybejici pozadi neni chyba - znamena "rozmazany nahradnik"
+    expect(worker).toContain("rozmazaný náhradník");
+  });
+
+  it("Shorts z videa je 30 sekund, ne cela pisen", () => {
+    const loopBranch = worker.slice(worker.indexOf('} else if (type === "source_loop")'));
+    expect(loopBranch, "source_loop nebere nejsilnejsi usek").toContain("pickBest30s");
+    expect(loopBranch).toContain('"-t", "30"');
   });
 });

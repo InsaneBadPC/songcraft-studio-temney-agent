@@ -160,9 +160,9 @@ async function renderSeamlessVideoLoop(source, audio, output, aspect) {
     "-y", "-stream_loop", String(loops), "-i", unit, "-i", audio,
     "-filter_complex",
     `[0:v]split=2[fg][bg];` +
-      `[bg]scale=${w}:${h}:force_original_aspect_ratio=increase,crop=${w}:${h},gblur=sigma=24,eq=brightness=-0.12:saturation=0.6[bgb];` +
-      `[fg]scale=${w}:-2,pad=${w}:${h}:(ow-iw)/2:(oh-ih)/2:color=black[fgp];` +
-      `[bgb][fgp]overlay=0:0,format=yuv420p[v]`,
+      `[bg]scale=${w}:${h}:force_original_aspect_ratio=increase,crop=${w}:${h},gblur=sigma=24,eq=brightness=0.10:saturation=0.75[bgb];` +
+      `[fg]scale=${w}:-2[fgv];` +
+      `[bgb][fgv]overlay=(W-w)/2:(H-h)/2:format=yuv420,format=yuv420p[v]`,
     "-map", "[v]", "-map", "1:a",
     "-t", audioDuration.toFixed(3),
     "-c:v", "libx264", "-preset", "veryfast", "-crf", "20", "-pix_fmt", "yuv420p",
@@ -173,20 +173,62 @@ async function renderSeamlessVideoLoop(source, audio, output, aspect) {
 }
 
 /**
+ * Svislé pozadí pro KAŽDÝ typ Shortsu, ne jen pro jeden režim.
+ *
+ * Kde se bere:
+ *   1. job.short_background_path - obrázek, který uživatel přiřadil k písni
+ *   2. <user_id>/covers/short-bg.png - výchozí, který si uživatel nahraje
+ *   3. nic -> volající si musí umílet rozmazaný náhradník
+ *
+ * Vrátí cestu k souboru na disku, nebo null. Stahování se nesmí pokládat za
+ * chybu: chybějící pozadí znamená "použij rozmazaný", ne "spadni".
+ */
+async function resolveShortBackground(job, work) {
+  const candidates = [
+    typeof job.short_background_path === "string" && job.short_background_path
+      ? job.short_background_path
+      : null,
+    `${job.user_id}/covers/short-bg.png`,
+  ].filter(Boolean);
+  for (const candidate of candidates) {
+    try {
+      const raw = path.join(work, "shortbg.raw");
+      await download(await signed(ownedPath(job.user_id, candidate)), raw);
+      const ext = sniffImageExtension(await readFile(raw));
+      const target = path.join(work, `shortbg.${ext}`);
+      if (target !== raw) await writeFile(target, await readFile(raw));
+      await rm(raw, { force: true });
+      console.log(`[${job.id}] svislé pozadí: ${candidate}`);
+      return target;
+    } catch {
+      // další kandidát, nebo žádný
+    }
+  }
+  console.log(`[${job.id}] svislé pozadí: žádné nenalezeno, jde se na rozmazaný náhradník`);
+  return null;
+}
+
+/**
  * Dashboard (I2V i scény) vrací 16:9. Když job hlásí 9:16, převedeme výstup na
  * 1080x1920 s rozmazaným pozadím, aby šel záznam v agent_videos.aspect odrážel
  * skutečný výstup. Bez toho by short v DB tvrdil svislé a soubor byl vodorovný.
  */
-async function fitToAspect(file, aspect) {
+async function fitToAspect(file, aspect, background = null) {
   if (aspect !== "9:16") return file;
   const target = `${file}.vertical.mp4`;
+  // Stejné pravidlo jako v loop engine: pad s color=black se NIKDY nepoužívá,
+  // je neprůhledný a překryl by pozadí. Předmět se zmenší a vycentruje.
+  const graph = background
+    ? `[1:v]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,eq=brightness=-0.04:saturation=0.9[bgb];`
+      + `[0:v]scale=1080:-2[fgv];`
+      + `[bgb][fgv]overlay=(W-w)/2:(H-h)/2:format=yuv420,format=yuv420p[v]`
+    : `[0:v]split=2[fg][bg];`
+      + `[bg]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,gblur=sigma=24,eq=brightness=0.10:saturation=0.75[bgb];`
+      + `[fg]scale=1080:-2[fgv];`
+      + `[bgb][fgv]overlay=(W-w)/2:(H-h)/2:format=yuv420,format=yuv420p[v]`;
   await exec("ffmpeg", [
-    "-y", "-i", file,
-    "-filter_complex",
-    `[0:v]split=2[fg][bg];` +
-      `[bg]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,gblur=sigma=24,eq=brightness=-0.12:saturation=0.6[bgb];` +
-      `[fg]scale=1080:-2,pad=1080:1920:(ow-iw)/2:(oh-ih)/2:color=black[fgp];` +
-      `[bgb][fgp]overlay=0:0,format=yuv420p[v]`,
+    "-y", "-i", file, ...(background ? ["-i", background] : []),
+    "-filter_complex", graph,
     "-map", "[v]", "-map", "0:a?",
     "-c:v", "libx264", "-preset", "veryfast", "-crf", "20", "-pix_fmt", "yuv420p",
     "-c:a", "copy", "-movflags", "+faststart", target,
@@ -380,23 +422,8 @@ async function processJob(job) {
         if (songCover !== songCoverRaw) await writeFile(songCover, await readFile(songCoverRaw));
         await rm(songCoverRaw, { force: true });
 
-        // statické pozadí z dodaného souboru, jinak tmavý rozmazaný obál.
-        // Shorts vždy dostane vertikální filler, který uživatel nahrál do bucketu.
-        const bgPath = typeof job.short_background_path === "string" && job.short_background_path
-          ? ownedPath(job.user_id, job.short_background_path)
-          : ownedPath(job.user_id, `${job.user_id}/covers/short-bg.png`);
-        let bg = null;
-        if (bgPath) {
-          try {
-            const bgRaw = path.join(work, "bg.raw");
-            await download(await signed(bgPath), bgRaw);
-            bg = path.join(work, `bg.${sniffImageExtension(await readFile(bgRaw))}`);
-            if (bg !== bgRaw) await writeFile(bg, await readFile(bgRaw));
-            await rm(bgRaw, { force: true });
-          } catch {
-            bg = null; // pozadí nedostupné -> tmavý rozmazaný obál alba
-          }
-        }
+        // Stejné pozadí jako u ostatních typů - viz resolveShortBackground.
+        const bg = await resolveShortBackground(job, work);
         const best = await pickBest30s(audio).catch(() => 0);
         const clipStart = Math.max(0, best);
         const segAudio = path.join(work, "audio30.m4a");
@@ -480,14 +507,23 @@ async function processJob(job) {
         await download(await signed(ownedPath(job.user_id, row.storage_path)), target);
         scenes.push({ kind: row.kind === "video" ? "video" : "image", path: target, sceneMs: Number(row.scene_ms || 0) });
       }
-      const result = await buildGalleryVideo({
+      let result = await buildGalleryVideo({
         audio, cover: artwork, scenes, out: output,
         workDir: path.join(work, "gallery"),
         mediaFilter, seed: String(job.id),
         onProgress: (line) => { console.log(`[${job.id}] ${line}`); void refreshLease(job.id, job.user_id); },
       });
+      // gallery engine skládá vždy 16:9. Když job chce 9:16, musí se to teprve
+      // tady převést - jinak by v DB bylo 9:16 a ve skutečnosti vodorovné video.
+      if (job.aspect === "9:16") {
+        const fitted = await fitToAspect(output, "9:16", await resolveShortBackground(job, work));
+        if (fitted !== output) {
+          await writeFile(output, await readFile(fitted));
+          await rm(fitted, { force: true });
+        }
+      }
       await assertPlayableVideo(output);
-      console.log(`[ready] ${job.id} (${type}, ${result.clips} klipů, ${result.duration.toFixed(2)} s)`);
+      console.log(`[ready] ${job.id} (${type}, ${result.clips} klipů, ${result.duration.toFixed(2)} s, ${job.aspect})`);
     } else if (type === "source_loop") {
       // === větev D2: loop engine (náhrada image_animation a full_scenes) ===
       // Všechno běží lokálním ffmpegem, žádný dashboard, žádné drahé GPU.
@@ -504,14 +540,29 @@ async function processJob(job) {
         if (sourceImage !== raw) await writeFile(sourceImage, await readFile(raw));
         await rm(raw, { force: true });
       }
+      // Shorts je 30 sekund z nejsilnějšího úseku, ne celá píseň. 16:9 běží
+      // dál na celou délku. Audio se zkrátí tady a loop engine podle něj
+      // postaví průchody, takže není potřeba nic dalšího přepočítávat.
+      let loopAudio = audio;
+      let shortBg = null;
+      if (job.aspect === "9:16") {
+        const best = await pickBest30s(audio).catch(() => 0);
+        loopAudio = path.join(work, "audio30.m4a");
+        await exec("ffmpeg", [
+          "-y", "-ss", best.toFixed(2), "-t", "30", "-i", audio,
+          "-c:a", "aac", "-b:a", "192k", loopAudio,
+        ], { maxBuffer: 10 * 1024 * 1024 });
+        shortBg = await resolveShortBackground(job, work);
+      }
       const result = await buildLoopVideo({
         sourceVideo,
         sourceImage,
-        audio,
+        audio: loopAudio,
         out: output,
         workDir: path.join(work, "loop"),
         seed: String(job.id),
         aspect: job.aspect === "9:16" ? "9:16" : "16:9",
+        background: shortBg,
         onProgress: (line) => {
           console.log(`[${job.id}] ${line}`);
           void refreshLease(job.id, job.user_id);
@@ -537,7 +588,11 @@ async function processJob(job) {
       const record = await dashGenerate(mode, audio, artwork, song.title, job.prompt_used || "");
       await dashPoll(record.run_id);
       await download(`${dashboardUrl}/api/runs/${record.run_id}/download`, output, { Authorization: dashAuth() });
-      const fitted = await fitToAspect(output, job.aspect);
+      const fitted = await fitToAspect(
+        output,
+        job.aspect,
+        job.aspect === "9:16" ? await resolveShortBackground(job, work) : null,
+      );
       if (fitted !== output) {
         await writeFile(output, await readFile(fitted));
         await rm(fitted, { force: true });

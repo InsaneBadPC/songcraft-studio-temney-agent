@@ -460,10 +460,14 @@ export async function buildLoopVideo(options) {
   const {
     sourceVideo, sourceImage, audio, out, workDir,
     seed = "songcraft", aspect = "16:9", onProgress = () => {},
+    // svislý obrázek, který má vyplnit celý rám 9:16. Když chybí, použije se
+    // rozmazaný předmět. Obojí musí být viditelné - viz 9:16 graf níže.
+    background = null,
   } = options;
   if (!sourceVideo && !sourceImage) throw new Error("loop engine potřebuje sourceVideo nebo sourceImage");
   if (!audio) throw new Error("loop engine potřebuje audio pro určení délky videa");
   if (aspect !== "16:9" && aspect !== "9:16") throw new Error(`neznámý poměr stran: ${aspect}`);
+  if (background && aspect !== "9:16") throw new Error("verticalni pozadi jde jen pro 9:16");
   await mkdir(workDir, { recursive: true });
 
   const duration = await probeDuration(audio);
@@ -581,18 +585,29 @@ export async function buildLoopVideo(options) {
   // stejný vstup. Cílový poměr stran se řeší až tady, jedním průchodem.
   const vertical = aspect === "9:16";
   const dims = vertical ? { w: 1080, h: 1920 } : { w: W, h: H };
-  // celý graf včetně vstupních labelů, jinak se vstup vloží dvakrát
+  // POZOR: tady byla černá. `pad=...:color=black` vyplní prázdná místa
+  // NEPRŮHLEDNOU černou a ta se pak v overlay položí NAVRCH pozadí. Výsledek
+  // nebylo „výrazné pozadí", byla to čistá černá: průměr 0,0, rozptyl 0,00,
+  // maximum 0 na 69 % výšky snímku. Žádné pozadí, jen pruhy.
+  // Správně se nepoužívá pad vůbec - předmět se jen zmenší na šířku a
+  // vycentruje přes overlay, takže pozadí zůstane vidět kolem něj.
   const fit = vertical
-    ? `[0:v]split=2[fg][bg];`
-      + `[bg]scale=${dims.w}:${dims.h}:force_original_aspect_ratio=increase,crop=${dims.w}:${dims.h},`
-      + `gblur=sigma=24,eq=brightness=-0.14:saturation=0.55[bgb];`
-      + `[fg]scale=${dims.w}:-2,pad=${dims.w}:${dims.h}:(ow-iw)/2:(oh-ih)/2:color=black[fgp];`
-      + `[bgb][fgp]overlay=0:0,format=yuv420p[v]`
+    ? (background
+      // uživatel nahral vlastní svislý obrázek, ten je pozadí
+      ? `[1:v]scale=${dims.w}:${dims.h}:force_original_aspect_ratio=increase,crop=${dims.w}:${dims.h},eq=brightness=-0.04:saturation=0.9[bgb];`
+      // žádný nahraný obrázek: rozmazaný předmět, a pozitivní jas aby to nebylo
+      // jen další černá plocha
+      : `[0:v]split=2[fg][bg];`
+        + `[bg]scale=${dims.w}:${dims.h}:force_original_aspect_ratio=increase,crop=${dims.w}:${dims.h},`
+        + `gblur=sigma=24,eq=brightness=0.10:saturation=0.75[bgb];`)
+      + `[${background ? "0:v" : "fg"}]scale=${dims.w}:-2[fgv];`
+      + `[bgb][fgv]overlay=(W-w)/2:(H-h)/2:format=yuv420,format=yuv420p[v]`
     : `[0:v]null[v]`; // 16:9 graf nepoužíváme, streamcopy s ním nesmí
   // Pro 16:9 se žádný filtr nepoužije: streamcopy a filtergraph se nesmí
   // kombinovat ("Streamcopy requested for output stream fed from a complex
   // filtergraph"). Pro 9:16 jde přes graf a video se překóduje.
   await ffmpeg(["-y", "-i", joined, "-i", audio,
+    ...(background ? ["-i", background] : []),
     ...(vertical
       ? ["-filter_complex", fit, "-map", "[v]", "-map", "1:a",
         "-c:v", "libx264", "-preset", "veryfast", "-crf", "20", "-pix_fmt", "yuv420p",
