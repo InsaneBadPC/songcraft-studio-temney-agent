@@ -591,10 +591,16 @@ export async function buildLoopVideo(options) {
   // maximum 0 na 69 % výšky snímku. Žádné pozadí, jen pruhy.
   // Správně se nepoužívá pad vůbec - předmět se jen zmenší na šířku a
   // vycentruje přes overlay, takže pozadí zůstane vidět kolem něj.
+  // Index vstupu s obrázkem pozadí. Níže jsou tři vstupy v pořadí
+  // joined (0), audio (1), background (2) - viz volání ffmpeg na konci.
+  // Chyba 12. 10.: tady bylo [1:v], tedy audio, které video stream nemá, a
+  // render skončil "Stream specifier ':v' in filtergraph". Proto v 9:16 s
+  // nahráným pozadím nevyšel ani jeden short.
+  const backgroundInputIndex = 2;
   const fit = vertical
     ? (background
       // uživatel nahral vlastní svislý obrázek, ten je pozadí
-      ? `[1:v]scale=${dims.w}:${dims.h}:force_original_aspect_ratio=increase,crop=${dims.w}:${dims.h},eq=brightness=-0.04:saturation=0.9[bgb];`
+      ? `[${backgroundInputIndex}:v]scale=${dims.w}:${dims.h}:force_original_aspect_ratio=increase,crop=${dims.w}:${dims.h},eq=brightness=-0.04:saturation=0.9[bgb];`
       // žádný nahraný obrázek: rozmazaný předmět, a pozitivní jas aby to nebylo
       // jen další černá plocha
       : `[0:v]split=2[fg][bg];`

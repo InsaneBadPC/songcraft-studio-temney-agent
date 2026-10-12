@@ -258,6 +258,33 @@ describe("Oracle video worker contract", () => {
     expect(worker).toContain("rozmazaný náhradník");
   });
 
+  // Regrese 12. 10. 2026: source_loop 9:16 s nahraným pozadím spadl na
+  // "Stream specifier ':v' in filtergraph". V loop engine jsou vstupy
+  // joined(0), audio(1), background(2) - graf ale odkazoval [1:v], tedy na
+  // audio bez video stopy. Test výše hlídal jen nepřítomnost padu, ne to,
+  // ze odkaz sedí na správný vstup.
+  it("pozadi v loop engine odkazuje na vstup s obrazkem, ne na audio", () => {
+    const bgIndex = Number(/const backgroundInputIndex = (\d+)/.exec(engine)?.[1]);
+    expect(bgIndex, "loop engine nema definovany index vstupu pozadi").not.toBeNaN();
+    // vstupy jsou joined(0), audio(1), background(2) - graf musi cist obrazek
+    expect(bgIndex, "pozadi musi byt treti vstup (joined, audio, background)").toBe(2);
+    expect(engine).toContain("`[${backgroundInputIndex}:v]scale=");
+    expect(
+      engine,
+      "poradi vstupu se zmenilo, zkontroluj index pozadi",
+    ).toContain('["-y", "-i", joined, "-i", audio,');
+    // v buildLoopVideo nesmi graf pozadi odkazovat na vstup 1 (audio).
+    // xfade na radku s dvema klipy je jina situace, tam [1:v] spravne je.
+    const buildStart = engine.indexOf("async function buildLoopVideo");
+    expect(buildStart, "buildLoopVideo nenalezena").toBeGreaterThan(-1);
+    const build = engine.slice(buildStart);
+    for (const line of build.split("\n")) {
+      if (/\[1:v\]/.test(line) && !line.trimStart().startsWith("//")) {
+        throw new Error(`buildLoopVideo odkazuje [1:v] (audio) jako na video: ${line.trim()}`);
+      }
+    }
+  });
+
   it("Shorts z videa je 30 sekund, ne cela pisen", () => {
     const loopBranch = worker.slice(worker.indexOf('} else if (type === "source_loop")'));
     expect(loopBranch, "source_loop nebere nejsilnejsi usek").toContain("pickBest30s");
