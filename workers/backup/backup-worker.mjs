@@ -92,10 +92,22 @@ const BUCKET = "songcraft";
 const BACKUP_BUCKET = "songcraft-backups";
 const ARCHIVE_FORMAT = "tar.zst";
 
+/**
+ * PostgREST vrací buď pole (GET), nebo prázdné tělo (PATCH/DELETE a upsert s
+ * `Prefer: resolution=merge-duplicates`, který vrací 201 bez obsahu).
+ * `response.json()` na prázdném těle skončí na "Unexpected end of JSON input",
+ * takže se nejdřív čte text a parsuje se jen když něco je.
+ */
 async function request(endpoint, options = {}) {
   const response = await fetch(endpoint, { ...options, headers: { ...headers, ...(options.headers || {}) } });
-  if (!response.ok) throw new Error(`${response.status}: ${(await response.text()).slice(0, 400)}`);
-  return response.status === 204 ? null : response.json();
+  const text = response.status === 204 ? "" : await response.text();
+  if (!response.ok) throw new Error(`${response.status}: ${text.slice(0, 400)}`);
+  if (!text) return null;
+  try {
+    return JSON.parse(text);
+  } catch {
+    throw new Error(`${response.status}: odpověď není JSON (${text.slice(0, 120)})`);
+  }
 }
 
 /** Storage API vyžaduje lomítka v cestě DOSLOVA; encodeURIComponent by je změnilo na %2F → 400. */
@@ -428,6 +440,23 @@ async function downloadArchiveParts(base, parts, target) {
 // Obnova
 // ---------------------------------------------------------------------------
 
+/**
+ * Označí, v jakém kroku obnova byla, když spadne.
+ *
+ * Bez toho se chyba ztratí: "Unexpected end of JSON input" neříká, jestli to byl
+ * manifest, řádek v jsonl nebo odpověď z databáze. U úlohy, která stahuje a
+ * zapisuje 1,4 GB, je vědět, kde přesně skončila, rozdíl mezi minutou
+ * diagnostiky a hodinou hledání.
+ */
+async function stepRun(stage, task) {
+  try {
+    return await task();
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    throw new Error(`${stage}: ${message}`);
+  }
+}
+
 async function runRestore(job) {
   const jobId = job.id;
   const sourceUserId = typeof job.progress?.sourceUserId === "string" ? job.progress.sourceUserId : job.target_user_id;
@@ -450,36 +479,57 @@ async function runRestore(job) {
 
   const parts = Number(backup.archive_parts || 1);
   await setProgress(jobId, step("downloading", { source: backup.archive_path, parts }));
-  await downloadArchiveParts(backup.archive_path, parts, archivePath);
-  await extractArchive(archivePath, dir);
+  try {
+    await stepRun("stahování archivu", () => downloadArchiveParts(backup.archive_path, parts, archivePath));
+    await stepRun("rozbalení archivu", () => extractArchive(archivePath, dir));
 
-  const manifest = JSON.parse(await readFile(path.join(dir, "manifest.json"), "utf8"));
-  const archivedUser = manifest.users?.find((entry) => entry.userId === sourceUserId);
-  if (!archivedUser) {
-    throw new Error(`V archivu není uživatel ${sourceUserId}. V archivu jsou: ${(manifest.users ?? []).map((entry) => entry.email ?? entry.userId).join(", ")}`);
-  }
+    const manifest = await stepRun("čtení manifestu", async () =>
+      JSON.parse(await readFile(path.join(dir, "manifest.json"), "utf8")));
+    const archivedUser = manifest.users?.find((entry) => entry.userId === sourceUserId);
+    if (!archivedUser) {
+      throw new Error(`V archivu není uživatel ${sourceUserId}. V archivu jsou: ${(manifest.users ?? []).map((entry) => entry.email ?? entry.userId).join(", ")}`);
+    }
 
   const remap = sourceUserId === targetUserId ? null : { from: sourceUserId, to: targetUserId };
   const plan = planRestore(sourceUserId, targetUserId);
   const rowsDir = path.join(dir, "rows", sourceUserId);
   const filesDir = path.join(dir, "files", sourceUserId);
 
-  let inserted = 0;
+  // Celoarchov načti do paměti jen jako JSON - řádky jsou malé, na disku je
+  // 1,4 GB v souborech. Kontrola kolizí musí být hotová PŘED prvním zápisem.
+  const archiveRows = {};
   for (const [table, expected] of Object.entries(archivedUser.tables ?? {})) {
     if (!OWNED_TABLES.includes(table)) continue;
     const file = path.join(rowsDir, `${table}.jsonl`);
     if (!existsSync(file)) throw new Error(`V archivu chybí ${table} pro daného uživatele.`);
-
-    const rows = (await readFile(file, "utf8")).split("\n").filter(Boolean).map((line) => JSON.parse(line));
+    const rows = await stepRun(`čtení ${table}.jsonl`, async () =>
+      (await readFile(file, "utf8")).split("\n").filter(Boolean).map((line) => JSON.parse(line)));
     if (rows.length !== expected) throw new Error(`${table}: v archivu ${rows.length} řádků, manifest tvrdí ${expected}. Archiv je poškozený.`);
+    archiveRows[table] = rows;
+  }
 
-    const payload = rows.map(plan.row);
+  const cleanArchive = Object.fromEntries(Object.entries(archiveRows).map(([table, rows]) => [table, rows.map(plan.row)]));
+  for (const [table, rows] of Object.entries(cleanArchive)) {
+    await stepRun(`kontrola kolizí ${table}`, () =>
+      assertNoForeignCollisions(table, rows.map((row) => row[primaryKey(table)]), targetUserId));
+  }
+
+  let inserted = 0;
+  for (const [table, rows] of Object.entries(cleanArchive)) {
     const chunkSize = 200;
-    for (let start = 0; start < payload.length; start += chunkSize) {
-      const chunk = payload.slice(start, start + chunkSize);
-      await request(api(table, `?on_conflict=${primaryKey(table)}`), { method: "POST", body: JSON.stringify(chunk) });
+    for (let start = 0; start < rows.length; start += chunkSize) {
+      const chunk = rows.slice(start, start + chunkSize);
+      // `resolution=merge-duplicates` není volitelné: bez něj PostgREST
+      // `on_conflict` ignoruje, udělá obyčejný INSERT a skončí na
+      // "duplicate key value violates unique constraint". Obnova do stejného
+      // účtu tak padla na prvním řádku, který už v účtu byl.
+      await stepRun(`zápis ${table}`, () => request(api(table, `?on_conflict=${primaryKey(table)}`), {
+        method: "POST",
+        headers: { Prefer: "resolution=merge-duplicates" },
+        body: JSON.stringify(chunk),
+      }));
     }
-    inserted += payload.length;
+    inserted += rows.length;
     await setProgress(jobId, step("rows", { table, inserted }));
   }
 
@@ -495,10 +545,10 @@ async function runRestore(job) {
     const existing = await request(api(table, `?user_id=eq.${encodeURIComponent(targetUserId)}&select=${key}`));
     const stale = existing.map((row) => row[key]).filter((value) => !keep.has(value));
     if (stale.length === 0) continue;
-    await request(api(table, `?${key}=in.(${stale.join(",")})&user_id=eq.${encodeURIComponent(targetUserId)}`), {
+    await stepRun(`mazání přebytků ${table}`, () => request(api(table, `?${key}=in.(${stale.join(",")})&user_id=eq.${encodeURIComponent(targetUserId)}`), {
       method: "DELETE",
       headers: { Prefer: "return=minimal" },
-    });
+    }));
     removed += stale.length;
     await setProgress(jobId, step("pruning", { table, removed }));
   }
@@ -507,26 +557,30 @@ async function runRestore(job) {
   let bytes = 0;
   for (const entry of await walkAllFiles(filesDir)) {
     const relative = path.relative(filesDir, entry.absolute).split(path.sep).join("/");
-    await uploadFrom(plan.file(relative), entry.absolute, null, entry.size);
+    await stepRun(`nahrání souboru ${relative}`, () => uploadFrom(plan.file(relative), entry.absolute, null, entry.size));
     files += 1;
     bytes += entry.size;
     if (files % 5 === 0) await setProgress(jobId, step("files", { files, bytes }));
   }
 
   await request(api("sc_service_backups", `?id=eq.${encodeURIComponent(jobId)}`), {
-    method: "PATCH",
-    headers: { Prefer: "return=minimal" },
-    body: JSON.stringify({
-      status: "done",
-      manifest: { sourceUserId, targetUserId, remapped: Boolean(remap), rows: inserted, removed, files, bytes },
-      progress: step("done", { rows: inserted, removed, files, bytes }),
-      finished_at: new Date().toISOString(),
-    }),
-  });
+      method: "PATCH",
+      headers: { Prefer: "return=minimal" },
+      body: JSON.stringify({
+        status: "done",
+        manifest: { sourceUserId, targetUserId, remapped: Boolean(remap), rows: inserted, removed, files, bytes },
+        progress: step("done", { rows: inserted, removed, files, bytes }),
+        finished_at: new Date().toISOString(),
+      }),
+    });
 
-  await rm(dir, { recursive: true, force: true });
-  await rm(archivePath, { force: true });
-  console.log(`[${jobId}] obnova hotová: ${inserted} řádků, ${files} souborů${remap ? ", user_id přemapován" : ""}`);
+    console.log(`[${jobId}] obnova hotová: ${inserted} řádků, ${files} souborů${remap ? ", user_id přemapován" : ""}`);
+  } finally {
+    // Pracovní adresář i rozbalený archiv se uklízí AŽ po selhání taky. Bez toho
+    // zůstanou čtyři rozbalené kopie po 1,2 GB ležet na disku a VM má 36 GB.
+    await rm(dir, { recursive: true, force: true }).catch(() => {});
+    await rm(archivePath, { force: true }).catch(() => {});
+  }
 }
 
 async function walkAllFiles(root, out = []) {
@@ -571,6 +625,72 @@ async function tick() {
 }
 
 /**
+ * Přemapování jednoho řádku při obnově do jiného účtu.
+ *
+ * Přepíší se dvě věci:
+ *
+ *   1. `user_id` - aby řádek patřil cílovému účtu.
+ *   2. KAŽDÝ řetězec v hodnotách, který začíná na starém UUID. Cesty uvnitř
+ *      dat (cover_path, audio_path, storage_path, source_video_path, …) jsou
+ *      plné prefixu vlastníka a bez přepisu by ukazovaly na soubory původního
+ *      účtu. Tím by obnovený účet četl cizí soubory - přesně to, co celá ta
+ *      izolace řeší.
+ *
+ * Bod 2 není kosmetika: trigger `sc_catalog_path_guard` a `Storage path for
+ * sc_albums does not belong to its owner` obnovu zastaví, a to je správně.
+ * Bez přepisu by se to možná minulo jen u tabulky, která guard nemá, a cizí
+ * soubory by vedly dál.
+ *
+ * Rekurzuje se do objektů i polí. Vnitřní `id` zůstává beze změny, aby vazby
+ * mezi tabulkami zůstaly konzistentní.
+ */
+export function remapRow(row, sourceUserId, targetUserId) {
+  if (sourceUserId === targetUserId) return { ...row };
+  const prefix = `${sourceUserId}/`;
+  const walk = (value) => {
+    if (typeof value === "string") return value.startsWith(prefix) ? `${targetUserId}/${value.slice(prefix.length)}` : value;
+    if (Array.isArray(value)) return value.map(walk);
+    if (value && typeof value === "object") {
+      const out = {};
+      for (const [key, item] of Object.entries(value)) out[key] = key === "user_id" && item === sourceUserId ? targetUserId : walk(item);
+      return out;
+    }
+    return value;
+  };
+  return walk(row);
+}
+
+/**
+ * Kontrola kolizí před zápisem - a je to podmínka, ne kosmetika.
+ *
+ * `?on_conflict=id` u řádku, jehož `id` už v projektu existuje, **aktualizuje**
+ * ten existující řádek. Kdyby jeho `user_id` patřilo původnímu vlastníkovi,
+ * obnova by data ukradla a přesunula k novému účtu, místo aby je zkopírovala.
+ * To je přesně opak toho, co "každý uživatel má jen svá data" znamená.
+ *
+ * Proto se nejdřív zeptáme, jestli ID z archivu už v projektu nejsou. Jsou-li
+ * cizí, obnova skončí dřív, než se napíše jediný řádek. Je-li to vlastní ID
+ * cílového účtu, jde o normální obnovu do stejného účtu a upsert je správně.
+ *
+ * Dva reálné případy, kdy kolize nevadí:
+ *   - obnova do stejného účtu (přišel jsem o data),
+ *   - přenos do prázdného projektu (jiná instance, jiná ID).
+ */
+async function assertNoForeignCollisions(table, ids, targetUserId) {
+  if (ids.length === 0) return;
+  const key = primaryKey(table);
+  const existing = await request(api(table, `?${key}=in.(${ids.join(",")})&select=${key},user_id&limit=${ids.length}`));
+  const foreign = (existing ?? []).filter((row) => row.user_id !== targetUserId);
+  if (foreign.length > 0) {
+    throw new Error(
+      `Obnova zastavena: ${foreign.length} ID v tabulce ${table} už v projektu existuje a patří jinému ` +
+      `účtu. Zápis by je přesunul k cílovému účtu, ne zkopíroval. Použij obnovu do stejného účtu, ` +
+      `nebo zálohu rozlož do prázdného projektu.`,
+    );
+  }
+}
+
+/**
  * Obnova jednoho uživatele do cílového účtu.
  *
  * Klíčová vlastnost: při `restore_new` má zdrojový účet v archivu jiné UUID než
@@ -581,11 +701,11 @@ async function tick() {
  * Vnitřní ID řádků se NEMĚNÍ, aby vazby mezi tabulkami (sc_audio_versions.song_id,
  * youtube_publications.agent_video_id) zůstaly konzistentní.
  */
-export function planRestore(sourceUserId, targetUserId, rows, relativeFile) {
+export function planRestore(sourceUserId, targetUserId) {
   const remapped = sourceUserId !== targetUserId;
   return {
     remapped,
-    row: (row) => (remapped ? { ...row, user_id: targetUserId } : row),
+    row: (row) => (remapped ? remapRow(row, sourceUserId, targetUserId) : row),
     file: (relativePath) => (remapped ? `${targetUserId}/${relativePath}` : `${sourceUserId}/${relativePath}`),
     // Cesta v archivu, kde leží soubor daného uživatele.
     archivedFile: (relativePath) => `${sourceUserId}/${relativePath}`,

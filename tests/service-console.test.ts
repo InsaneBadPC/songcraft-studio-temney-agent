@@ -131,6 +131,38 @@ describe("obnova dá každému účtu jen jeho vlastní data", () => {
     expect(plan.file("audio/song.mp3")).toBe(`${TARGET}/audio/song.mp3`);
   });
 
+  /**
+   * Cesty uvnitř dat (`cover_path`, `audio_path`, `storage_path`) jsou plné
+   * prefixu vlastníka. Bez přepisu by obnovený účet mířil na soubory původního
+   * vlastníka - trigger `sc_catalog_path_guard` obnovu zastaví
+   * ("Storage path for sc_albums does not belong to its owner") a to je správně.
+   * Bez guardu by se to mohlo minout a cizí soubory by vedly dál.
+   */
+  it("přepíše i cesty uvnitř dat, nejen user_id", () => {
+    const plan = planRestore(SOURCE, TARGET);
+    expect(plan.row({
+      id: "song-1",
+      user_id: SOURCE,
+      cover_path: `${SOURCE}/covers/abc.png`,
+      audio_path: `${SOURCE}/audio/song.mp3`,
+      title: `${SOURCE}/covers/jina.png`,
+    })).toEqual({
+      id: "song-1",
+      user_id: TARGET,
+      cover_path: `${TARGET}/covers/abc.png`,
+      audio_path: `${TARGET}/audio/song.mp3`,
+      title: `${TARGET}/covers/jina.png`,
+    });
+    // Rekurze do objektů a polí.
+    expect(plan.row({ nested: { storage_path: `${SOURCE}/videos/x.mp4` } }).nested.storage_path).toBe(`${TARGET}/videos/x.mp4`);
+    expect(plan.row({ list: [`${SOURCE}/covers/a.png`, "ostatni"] }).list).toEqual([`${TARGET}/covers/a.png`, "ostatni"]);
+    // Cesta, která patří někomu jinému, se nesmí přepsat.
+    expect(plan.row({ cover_path: "33333333-3333-3333-3333-333333333333/covers/a.png" }).cover_path)
+      .toBe("33333333-3333-3333-3333-333333333333/covers/a.png");
+    // Do stejného účtu se nemění nic.
+    expect(planRestore(SOURCE, SOURCE).row({ cover_path: `${SOURCE}/covers/a.png` }).cover_path).toBe(`${SOURCE}/covers/a.png`);
+  });
+
   it("vnitřní ID řádků zůstává, aby vazby mezi tabulkami nepovolily", () => {
     const plan = planRestore(SOURCE, TARGET);
     const row = plan.row({ id: "row-1", user_id: SOURCE, song_id: "song-9" });
@@ -145,10 +177,42 @@ describe("obnova dá každému účtu jen jeho vlastní data", () => {
     expect(order.indexOf("sc_songs")).toBeLessThan(order.indexOf("sc_lyrics"));
   });
 
+  /**
+   * `?on_conflict=id` u řádku, jehož ID už v projektu existuje, AKTUALIZUJE ten
+   * existující řádek - a přepíše mu user_id. Kdyby ten řádek patřil původnímu
+   * vlastníkovi, obnova by data přesunula, ne zkopírovala. Proto se kontrolují
+   * kolize PŘED prvním zápisem.
+   */
+  it("kontroluje kolize ID cizích účtů před prvním zápisem", () => {
+    expect(worker).toContain("async function assertNoForeignCollisions");
+    expect(worker).toContain("Obnova zastavena");
+    expect(worker).toContain("row.user_id !== targetUserId");
+    // Kontrola musí proběhnout nad všemi tabulkami dřív, než začne zápis.
+    expect(worker.indexOf("for (const [table, rows] of Object.entries(cleanArchive)) {\n    await assertNoForeignCollisions"))
+      .toBeLessThan(worker.indexOf("for (const [table, rows] of Object.entries(cleanArchive)) {\n    const chunkSize = 200"));
+  });
+
   it("řádky se vkládají po 200 a archví se nedá obejít", () => {
     expect(worker).toContain("const chunkSize = 200");
+    // `resolution=merge-duplicates` není volitelné - bez něj PostgREST
+    // `on_conflict` ignoruje a skončí na duplicate key.
+    expect(worker).toContain("Prefer: \"resolution=merge-duplicates\"");
     // Počet řádků v archivu se musí shodovat s manifestem.
     expect(worker).toContain("manifest tvrdí");
+  });
+
+  it("uklízí pracovní adresář i po selhání, ne jen po úspěchu", () => {
+    expect(worker).toContain("} finally {");
+    // Bez toho zůstanou rozbalené kopie po 1,2 GB ležet na 36GB disku.
+    expect(worker.indexOf("await rm(dir, { recursive: true, force: true }).catch(() => {})"))
+      .toBeGreaterThan(worker.indexOf("obnova hotová"));
+  });
+
+  it("každý krok obnovy v chybě hlásí, kde selhal", () => {
+    expect(worker).toContain("async function stepRun(");
+    for (const stage of ["čtení manifestu", "kontrola kolizí", "zápis ", "mazání přebytků", "nahrání souboru", "rozbalení archivu"]) {
+      expect(worker).toContain(stage);
+    }
   });
 
   /**
