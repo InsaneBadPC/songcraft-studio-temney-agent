@@ -72,9 +72,8 @@ Deno.serve(async (request) => {
     if (!sameBytes(await hashToken(input.confirmationToken), String(row.nonce_hash ?? ""))) {
       await admin.from("agent_action_log").insert({
         user_id: user.id,
-        agent_name: "agent",
-        tool_name: `confirm:${input.action}`,
-        status: "error",
+        action_type: `confirm:${input.action}`,
+        result: "error",
         payload: { opId: row.id, reason: "neplatný potvrzovací token" },
       });
       return json({ error: "Potvrzení není platné." }, 403);
@@ -93,9 +92,8 @@ Deno.serve(async (request) => {
     if (claimError || !claim) return json({ error: "Operaci už někdo potvrdil." }, 409);
     await admin.from("agent_action_log").insert({
       user_id: user.id,
-      agent_name: "agent",
-      tool_name: `confirm:${input.action}`,
-      status: "success",
+      action_type: `confirm:${input.action}`,
+      result: "success",
       payload: { opId: claim.id, kind: claim.kind, summary: claim.summary },
     });
     return json({

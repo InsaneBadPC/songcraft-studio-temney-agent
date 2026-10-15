@@ -53,3 +53,6 @@ verify_jwt = false
 
 [functions.youtube-publish-scheduler]
 verify_jwt = false
+
+[functions.songcraft-service-console]
+verify_jwt = true

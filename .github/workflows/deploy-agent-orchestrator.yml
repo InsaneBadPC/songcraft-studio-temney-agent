@@ -129,3 +129,4 @@ jobs:
           supabase functions deploy --use-api songcraft-rhymes --project-ref "$SUPABASE_PROJECT_ID"
           supabase functions deploy --use-api songcraft-utilities --project-ref "$SUPABASE_PROJECT_ID"
           supabase functions deploy --use-api songcraft-studio-assistant --project-ref "$SUPABASE_PROJECT_ID"
+          supabase functions deploy --use-api songcraft-service-console --project-ref "$SUPABASE_PROJECT_ID"
