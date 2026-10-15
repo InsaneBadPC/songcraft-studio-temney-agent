@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
-import { deleteOrder, joinStoragePath, OWNED_TABLES, planRestore } from "../workers/backup/backup-worker.mjs";
+import { deleteOrder, joinStoragePath, OWNED_TABLES, PART_SIZE, partCount, partName, planRestore } from "../workers/backup/backup-worker.mjs";
 
 const migrationAccounts = readFileSync("supabase/migrations/20261015000000_service_console.sql", "utf8");
 const migrationBucket = readFileSync("supabase/migrations/20261015000001_backup_bucket.sql", "utf8");
@@ -88,8 +88,27 @@ describe("archiv patří všem účtům, ale neodnáší cizí tajemství", () =
       expect(bad).not.toContain("//");
     }
     expect(worker).toContain("joinStoragePath(prefix, entry.name)");
-    // Archiv musí jít do bucketu, který tenhle MIME typ vůbec přijímá.
-    expect(worker).toContain('"Content-Type": "application/x-zstd"');
+  });
+
+  /**
+   * Bucket jde přes Cloudflare, který má limit 100 MB na tělo jednoho
+   * requestu. Archiv 1,28 GB v jednom POST visel 22 minut, nic nezapsal a
+   * 2jádrová VM s 954 MB RAM přestala odpovídat i na SSH. Bez dělení na části
+   * to udělá znovu a shodí i renderer, který na té VM běží.
+   */
+  it("posílá archiv po částech pod limitem gatewaye", () => {
+    expect(PART_SIZE).toBeLessThanOrEqual(100 * 1024 * 1024);
+    expect(partCount(1_284_152_613, PART_SIZE)).toBe(26);
+    expect(partCount(1000, PART_SIZE)).toBe(1);
+    expect(partCount(0, PART_SIZE)).toBe(1);
+    expect(partName("abc", 0)).toBe("abc.part-0001");
+    expect(partName("abc", 25)).toBe("abc.part-0026");
+    expect(worker).toContain("uploadArchiveParts");
+    expect(worker).toContain("downloadArchiveParts");
+    expect(worker).toContain("archive_parts: parts");
+    expect(worker).toContain("createReadStream(file, { start, end })");
+    // Žádný request nesmí nést celý archiv najednou.
+    expect(worker).not.toContain("uploadFromArchive");
   });
 });
 

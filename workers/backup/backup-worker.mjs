@@ -347,19 +347,25 @@ async function runBackup(job) {
   await rm(archivePath, { force: true });
   await writeArchive(dir, archivePath);
   const archiveStat = await stat(archivePath);
+  if (archiveStat.size > maxUploadBytes) {
+    throw new Error(`Archiv má ${archiveStat.size} B, limit je ${maxUploadBytes} B.`);
+  }
 
   await setProgress(jobId, step("uploading", { archiveBytes: archiveStat.size }));
-  await uploadFromArchive(`${jobId}.${ARCHIVE_FORMAT}`, archivePath, archiveStat.size);
+  const parts = await uploadArchiveParts(jobId, archivePath, archiveStat.size, async (done, total, bytes) => {
+    await setProgress(jobId, step("uploading", { part: done, parts: total, archiveBytes: archiveStat.size, sentBytes: bytes }));
+  });
 
   await request(api("sc_service_backups", `?id=eq.${encodeURIComponent(jobId)}`), {
     method: "PATCH",
     headers: { Prefer: "return=minimal" },
     body: JSON.stringify({
       status: "done",
-      archive_path: `${jobId}.${ARCHIVE_FORMAT}`,
+      archive_path: jobId,
       archive_bytes: archiveStat.size,
-      manifest: manifest.totals,
-      progress: step("done", { archiveBytes: archiveStat.size }),
+      archive_parts: parts,
+      manifest: { ...manifest.totals, parts },
+      progress: step("done", { archiveBytes: archiveStat.size, parts }),
       finished_at: new Date().toISOString(),
     }),
   });
@@ -369,27 +375,58 @@ async function runBackup(job) {
   console.log(`[${jobId}] záloha hotová: ${manifest.totals.users} účtů, ${manifest.totals.files} souborů, ${archiveStat.size} B`);
 }
 
+/**
+ * Archiv se NEposílá v jednom requestu. Bucket songcraft-backups jde přes
+ * Cloudflare, který má tvrdý limit na velikost těla jednoho requestu (100 MB);
+ * 1,28 GB v jednom POST nikdy nedojde a request zůstane viset, než ho
+ * gateway odpojí - což na 2jádrové VM s 954 MB RAM zablokuje i renderer.
+ *
+ * Proto se archiv posílá po částech. Části se čtou ze souboru po offsetu, takže
+ * se na disku nezdvojuje. `PART_SIZE` je pod limit s rezervou.
+ */
+const PART_SIZE = 48 * 1024 * 1024;
+
+export function partCount(totalBytes, partSize = PART_SIZE) {
+  return Math.max(1, Math.ceil(totalBytes / partSize));
+}
+
+export function partName(base, index) {
+  return `${base}.part-${String(index + 1).padStart(4, "0")}`;
+}
+
 /** Archiv jde do jiného bucketu než uživatelská média, takže má vlastní cestu. */
-async function uploadFromArchive(objectPath, file, bytes) {
-  if (bytes > maxUploadBytes) throw new Error(`Archiv je větší než ${maxUploadBytes} B`);
-  const response = await fetch(`${url}/storage/v1/object/${BACKUP_BUCKET}/${encodePath(objectPath)}`, {
-    method: "POST",
-    headers: { ...headers, "Content-Type": "application/x-zstd", "x-upsert": "true" },
-    body: Readable.toWeb(createReadStream(file)),
-    duplex: "half",
-  });
-  if (!response.ok) throw new Error(`Nahrání archivu selhalo: HTTP ${response.status} ${(await response.text()).slice(0, 200)}`);
+async function uploadArchiveParts(base, file, bytes, onProgress) {
+  const parts = partCount(bytes);
+  for (let index = 0; index < parts; index += 1) {
+    const start = index * PART_SIZE;
+    const end = Math.min(start + PART_SIZE, bytes) - 1;
+    const size = end - start + 1;
+    const response = await fetch(`${url}/storage/v1/object/${BACKUP_BUCKET}/${encodePath(partName(base, index))}`, {
+      method: "POST",
+      headers: { ...headers, "Content-Type": "application/octet-stream", "x-upsert": "true" },
+      body: Readable.toWeb(createReadStream(file, { start, end })),
+      duplex: "half",
+    });
+    if (!response.ok) throw new Error(`Nahrání části ${index + 1}/${parts} selhalo: HTTP ${response.status} ${(await response.text()).slice(0, 200)}`);
+    onProgress?.(index + 1, parts, end + 1);
+  }
+  return parts;
+}
+
+/** Při obnově se části spojí v pořadí do jednoho souboru a ten se rozbalí. */
+async function downloadArchiveParts(base, parts, target) {
+  const stream = createWriteStream(target);
+  for (let index = 0; index < parts; index += 1) {
+    const response = await fetch(`${url}/storage/v1/object/${BACKUP_BUCKET}/${encodePath(partName(base, index))}`, { headers });
+    if (!response.ok) throw new Error(`Stažení části ${index + 1}/${parts} selhalo: HTTP ${response.status}`);
+    await pipeline(response.body, stream, { end: false });
+  }
+  await new Promise((resolve, reject) => { stream.end(resolve); stream.on("error", reject); });
 }
 
 // ---------------------------------------------------------------------------
 // Obnova
 // ---------------------------------------------------------------------------
-
-async function downloadArchive(objectPath, target) {
-  const response = await fetch(`${url}/storage/v1/object/${BACKUP_BUCKET}/${encodePath(objectPath)}`, { headers });
-  if (!response.ok) throw new Error(`Stažení archivu selhalo: HTTP ${response.status}`);
-  await pipeline(response.body, createWriteStream(target));
-}
 
 async function runRestore(job) {
   const jobId = job.id;
@@ -398,10 +435,10 @@ async function runRestore(job) {
   if (!targetUserId) throw new Error("Obnova nemá cílový účet.");
   if (!job.source_backup_id) throw new Error("Obnova nemá zdrojovou zálohu.");
 
-  const source = await request(
-    api("sc_service_backups", `?id=eq.${encodeURIComponent(job.source_backup_id)}&select=id,archive_path,status,kind`),
+  const sourceList = await request(
+    api("sc_service_backups", `?id=eq.${encodeURIComponent(job.source_backup_id)}&select=id,archive_path,archive_parts,archive_bytes,status,kind`),
   );
-  const backup = Array.isArray(source) ? source[0] : null;
+  const backup = Array.isArray(sourceList) ? sourceList[0] : null;
   if (!backup || backup.kind !== "backup" || backup.status !== "done" || !backup.archive_path) {
     throw new Error("Zdrojová záloha není hotová nebo nemá archiv.");
   }
@@ -411,8 +448,9 @@ async function runRestore(job) {
   await rm(dir, { recursive: true, force: true });
   await mkdir(dir, { recursive: true });
 
-  await setProgress(jobId, step("downloading", { source: backup.archive_path }));
-  await downloadArchive(backup.archive_path, archivePath);
+  const parts = Number(backup.archive_parts || 1);
+  await setProgress(jobId, step("downloading", { source: backup.archive_path, parts }));
+  await downloadArchiveParts(backup.archive_path, parts, archivePath);
   await extractArchive(archivePath, dir);
 
   const manifest = JSON.parse(await readFile(path.join(dir, "manifest.json"), "utf8"));
@@ -561,7 +599,7 @@ export function deleteOrder(archivedTables) {
 
 const isMain = Boolean(process.argv[1]) && import.meta.url === pathToFileURL(process.argv[1]).href;
 
-export { OWNED_TABLES, DELETE_ORDER, BUCKET, BACKUP_BUCKET, ARCHIVE_FORMAT, encodePath };
+export { OWNED_TABLES, DELETE_ORDER, BUCKET, BACKUP_BUCKET, ARCHIVE_FORMAT, PART_SIZE, encodePath };
 
 if (isMain) {
   if (!url || !key) throw new Error("SUPABASE_URL a SUPABASE_SERVICE_ROLE_KEY jsou povinné");
