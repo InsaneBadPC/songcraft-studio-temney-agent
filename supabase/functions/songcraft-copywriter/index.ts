@@ -1,6 +1,7 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "jsr:@supabase/supabase-js@2";
 import { isAllowedPrivateUser, privateAccessMessage } from "../_shared/access.ts";
+import { completeText, resolveSharedProvider, resolveUserProvider } from "../_shared/llm-providers.ts";
 
 const cors = { "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type", "Access-Control-Allow-Methods": "POST, OPTIONS" };
 const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { ...cors, "Content-Type": "application/json" } });
@@ -12,9 +13,7 @@ Deno.serve(async (request) => {
   const authorization = request.headers.get("Authorization");
   const url = Deno.env.get("SUPABASE_URL") || Deno.env.get("SONGCRAFT_SUPABASE_URL");
   const anonKey = Deno.env.get("SUPABASE_ANON_KEY") || Deno.env.get("SONGCRAFT_SUPABASE_ANON_KEY");
-  const geminiKey = Deno.env.get("GOOGLE_AI_STUDIO_KEY");
   if (!authorization || !url || !anonKey) return json({ error: "Chybí bezpečné připojení." }, 401);
-  if (!geminiKey) return json({ error: "AI copywriter není správně nakonfigurován." }, 503);
 
   const supabase = createClient(url, anonKey, { global: { headers: { Authorization: authorization } } });
   const { data: { user }, error: authError } = await supabase.auth.getUser();
@@ -25,6 +24,8 @@ Deno.serve(async (request) => {
   if (!input?.action || !input.songId) return json({ error: "Chybí skladba nebo akce." }, 400);
   if (!["description", "tags"].includes(input.action)) return json({ error: "Neznámá akce." }, 400);
 
+  // Service klient jen kvůli čtení vlastního API klíče z tabulky, která má
+  // záměrně žádnou client policy. Klíč se odtud nikdy nevrací do klienta.
   const admin = createClient(url, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || Deno.env.get("SONGCRAFT_SERVICE_ROLE_KEY") || anonKey);
   const { data: song, error: songError } = await admin.from("sc_songs").select("id,user_id,title,style_prompt,style_prompts,lyrics,album_id").eq("id", input.songId).single();
   if (songError || !song || song.user_id !== user.id) return json({ error: "Skladba nebyla nalezena." }, 404);
@@ -62,18 +63,16 @@ Deno.serve(async (request) => {
         "Vrať POUZE tagy oddělené čárkou, bez číslování, bez mřížek, bez dalšího textu.",
       ].join("\n");
 
-  const response = await fetch("https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-lite:generateContent", {
-    method: "POST",
-    headers: { "Content-Type": "application/json", "x-goog-api-key": geminiKey },
-    body: JSON.stringify({
-      systemInstruction: { parts: [{ text: `${instruction}\n\nMATERIÁL SKLADBY:\n${contextLines}` }] },
-      contents: [{ role: "user", parts: [{ text: input.action === "description" ? "Napiš popis videa na YouTube." : "Navrhni tagy." }] }],
-      generationConfig: { temperature: 0.8, maxOutputTokens: 900 },
-    }),
-  });
-  if (!response.ok) return json({ error: "Google AI teď odmítla požadavek. Zkus to za chvíli." }, response.status === 429 ? 429 : 502);
-  const generated = await response.json() as { candidates?: Array<{ content?: { parts?: Array<{ text?: unknown }> } }> };
-  let text = clip(generated.candidates?.[0]?.content?.parts?.map((part) => typeof part.text === "string" ? part.text : "").join("\n"), 5000)
+  const resolved = await resolveUserProvider(admin, user.id)
+    ?? resolveSharedProvider(() => ({ GOOGLE_AI_STUDIO_KEY: Deno.env.get("GOOGLE_AI_STUDIO_KEY"), GEMINI_API_KEY: Deno.env.get("GEMINI_API_KEY") }));
+  if (!resolved) return json({ error: "AI copywriter není správně nakonfigurován." }, 503);
+  const generated = await completeText(
+    resolved,
+    `${instruction}\n\nMATERIÁL SKLADBY:\n${contextLines}`,
+    input.action === "description" ? "Napiš popis videa na YouTube." : "Navrhni tagy.",
+    { temperature: 0.8, maxOutputTokens: 900 },
+  );
+  let text = clip(generated, 5000)
     .replace(/^```[a-z]*\n?|```$/g, "").trim();
   if (!text) return json({ error: "AI nevrátila text. Zkus to znovu." }, 502);
   if (input.action === "tags") {

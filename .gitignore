@@ -69,3 +69,6 @@ Thumbs.db
 .manus/
 .manus-logs/
 dist-web/
+
+# Artifakty Supabase CLI - obsahuji projektovy ref, nesmi do repa
+supabase/.temp/

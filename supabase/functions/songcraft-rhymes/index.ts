@@ -1,6 +1,7 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "jsr:@supabase/supabase-js@2";
 import { isAllowedPrivateUser, privateAccessMessage } from "../_shared/access.ts";
+import { completeText, resolveSharedProvider, resolveUserProvider } from "../_shared/llm-providers.ts";
 
 const cors = { "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type", "Access-Control-Allow-Methods": "POST, OPTIONS" };
 const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { ...cors, "Content-Type": "application/json" } });
@@ -11,9 +12,9 @@ Deno.serve(async (request) => {
   if (request.method === "OPTIONS") return new Response("ok", { headers: cors });
   if (request.method !== "POST") return json({ error: "Použij POST požadavek." }, 405);
   const authorization = request.headers.get("Authorization");
-  const geminiKey = Deno.env.get("GOOGLE_AI_STUDIO_KEY");
+  const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || Deno.env.get("SONGCRAFT_SERVICE_ROLE_KEY");
   if (!authorization) return json({ error: "Chybí přihlášení." }, 401);
-  if (!geminiKey) return json({ error: "Hledač rýmů není správně nakonfigurován." }, 503);
+  if (!serviceKey) return json({ error: "Hledač rýmů není správně nakonfigurován." }, 503);
 
   const supabase = createClient(Deno.env.get("SUPABASE_URL") || Deno.env.get("SONGCRAFT_SUPABASE_URL") || "", Deno.env.get("SUPABASE_ANON_KEY") || Deno.env.get("SONGCRAFT_SUPABASE_ANON_KEY") || "", { global: { headers: { Authorization: authorization } } });
   const { data: { user }, error: authError } = await supabase.auth.getUser();
@@ -49,18 +50,22 @@ Deno.serve(async (request) => {
     "Vrať POUZE JSON ve tvaru {\"exact\":[\"…\"],\"multiword\":[\"…\"],\"assonance\":[\"…\"]} — exact max 12, multiword max 12, assonance max 8 položek, bez vysvětlení.",
   ].join("\n");
 
-  const response = await fetch("https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent", {
-    method: "POST",
-    headers: { "Content-Type": "application/json", "x-goog-api-key": geminiKey },
-    body: JSON.stringify({
-      systemInstruction: { parts: [{ text: instruction }] },
-      contents: [{ role: "user", parts: [{ text: `Rýmy ke slovu: ${word}` }] }],
-      generationConfig: { temperature: 0.8, maxOutputTokens: 4000, thinkingConfig: { thinkingLevel: "low" } },
-    }),
-  });
-  if (!response.ok) return json({ error: "AI teď odmítla požadavek. Zkus to za chvíli." }, response.status === 429 ? 429 : 502);
-  const generated = await response.json() as { candidates?: Array<{ content?: { parts?: Array<{ text?: unknown }> } }> };
-  let raw = generated.candidates?.[0]?.content?.parts?.map((part) => typeof part.text === "string" ? part.text : "").join("\n").trim() ?? "";
+  const admin = createClient(
+    Deno.env.get("SUPABASE_URL") || Deno.env.get("SONGCRAFT_SUPABASE_URL") || "",
+    serviceKey,
+    { auth: { persistSession: false } },
+  );
+  const resolved = await resolveUserProvider(admin, user.id)
+    ?? resolveSharedProvider(() => ({ GOOGLE_AI_STUDIO_KEY: Deno.env.get("GOOGLE_AI_STUDIO_KEY"), GEMINI_API_KEY: Deno.env.get("GEMINI_API_KEY") }));
+  if (!resolved) return json({ error: "Hledač rýmů není správně nakonfigurován." }, 503);
+  const generated = await completeText(
+    resolved,
+    instruction,
+    `Rýmy ke slovu: ${word}`,
+    { temperature: 0.8, maxOutputTokens: 4000 },
+  );
+  if (!generated) return json({ error: "AI teď odmítla požadavek. Zkus to za chvíli." }, 502);
+  let raw = generated;
   raw = raw.replace(/^```(?:json)?\n?/i, "").replace(/```$/g, "").trim();
   const match = /\{[\s\S]*\}/.exec(raw);
   if (!match) return json({ error: "AI nevrátila platný výsledek." }, 502);

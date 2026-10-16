@@ -56,3 +56,6 @@ verify_jwt = false
 
 [functions.songcraft-service-console]
 verify_jwt = true
+
+[functions.songcraft-ai-settings]
+verify_jwt = true

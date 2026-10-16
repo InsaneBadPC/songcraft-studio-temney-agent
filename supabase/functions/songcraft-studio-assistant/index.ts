@@ -1,6 +1,7 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "jsr:@supabase/supabase-js@2";
 import { isAllowedPrivateUser, privateAccessMessage } from "../_shared/access.ts";
+import { completeText, resolveSharedProvider, resolveUserProvider } from "../_shared/llm-providers.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -33,9 +34,8 @@ Deno.serve(async (request) => {
   const supabaseUrl = Deno.env.get("SUPABASE_URL") || Deno.env.get("SONGCRAFT_SUPABASE_URL");
   const supabaseAnonKey = Deno.env.get("SUPABASE_ANON_KEY") || Deno.env.get("SONGCRAFT_SUPABASE_ANON_KEY");
   const supabaseServiceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || Deno.env.get("SONGCRAFT_SERVICE_ROLE_KEY");
-  const geminiKey = Deno.env.get("GOOGLE_AI_STUDIO_KEY");
   if (!authorization) return json({ error: "Chybí přihlášení." }, 401);
-  if (!supabaseUrl || !supabaseAnonKey || !supabaseServiceRoleKey || !geminiKey) return json({ error: "Experimentální asistent není správně nakonfigurován." }, 503);
+  if (!supabaseUrl || !supabaseAnonKey || !supabaseServiceRoleKey) return json({ error: "Experimentální asistent není správně nakonfigurován." }, 503);
 
   const supabase = createClient(supabaseUrl, supabaseAnonKey, { global: { headers: { Authorization: authorization } } });
   const { data: { user }, error: userError } = await supabase.auth.getUser();
@@ -75,18 +75,17 @@ Deno.serve(async (request) => {
     `SOUKROMÝ KONTEXT:\n${JSON.stringify(context)}`,
   ].join("\n\n");
 
-  const response = await fetch("https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-lite:generateContent", {
-    method: "POST",
-    headers: { "Content-Type": "application/json", "x-goog-api-key": geminiKey },
-    body: JSON.stringify({
-      systemInstruction: { parts: [{ text: instruction }] },
-      contents: [...historyFrom(input ?? {}), { role: "user", parts: [{ text: message }] }],
-      generationConfig: { temperature: 0.7, maxOutputTokens: 700 },
-    }),
-  });
-  if (!response.ok) return json({ error: "Bezplatný Gemini model nyní odmítl požadavek. Zkus to za chvíli." }, response.status === 429 ? 429 : 502);
-  const generated = await response.json() as { candidates?: Array<{ content?: { parts?: Array<{ text?: unknown }> } }> };
-  const answer = clip(generated.candidates?.[0]?.content?.parts?.map((part) => typeof part.text === "string" ? part.text : "").join("\n"), 6_000);
+  const admin = createClient(supabaseUrl, supabaseServiceRoleKey, { auth: { persistSession: false } });
+  const resolved = await resolveUserProvider(admin, user.id)
+    ?? resolveSharedProvider(() => ({ GOOGLE_AI_STUDIO_KEY: Deno.env.get("GOOGLE_AI_STUDIO_KEY"), GEMINI_API_KEY: Deno.env.get("GEMINI_API_KEY") }));
+  if (!resolved) return json({ error: "AI není správně nakonfigurováno." }, 503);
+  const history = historyFrom(input ?? {});
+  const answer = clip(
+    history.length
+      ? await completeText(resolved, instruction, history.map((entry) => `${entry.role}: ${entry.parts?.[0]?.text ?? ""}`).join("\n\n") + `\n\nuser: ${message}`, { temperature: 0.7, maxOutputTokens: 700 })
+      : await completeText(resolved, instruction, message, { temperature: 0.7, maxOutputTokens: 700 }),
+    6_000,
+  );
   if (!answer) return json({ error: "Asistent nevrátil textovou odpověď." }, 502);
   return json({ answer });
 });

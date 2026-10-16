@@ -8,6 +8,7 @@ import {
   privateAccessMessage,
 } from "../_shared/access.ts";
 import { describeRecipe, planMotion, visionProvider } from "./motion-recipe.ts";
+import { PROVIDERS, resolveUserProvider } from "../_shared/llm-providers.ts";
 
 const cors = {
   "Access-Control-Allow-Origin": "*",
@@ -421,54 +422,65 @@ function envKeys(): Record<string, string | undefined> {
 }
 
 // Provideri jsou na uroven modulu, protoze je potrebuje i planMotion (vision).
-const PROVIDERS: ProviderCfg[] = [
-  {
-    id: "gemini",
-    keyEnvs: ["GOOGLE_AI_STUDIO_KEY", "GEMINI_API_KEY"],
-    base: "https://generativelanguage.googleapis.com/v1beta",
-    models: [
-      "gemini-3.1-flash-lite",
-      "gemini-2.5-flash-lite",
-      "gemini-flash-lite-latest",
-    ],
-    chat: geminiChat,
-  },
-  {
-    id: "openrouter",
-    keyEnvs: ["OPENROUTER_API_KEY"],
-    base: "https://openrouter.ai/api/v1",
-    models: [
-      "google/gemini-3.1-flash-lite",
-      "google/gemini-3.5-flash-lite",
-      "deepseek/deepseek-v4.1-flash",
-    ],
-    chat: openaiCompatibleChat,
-  },
-  {
-    id: "deepseek",
-    keyEnvs: ["DEEPSEEK_API_KEY"],
-    base: "https://api.deepseek.com",
-    models: ["deepseek-chat", "deepseek-flash"],
-    chat: openaiCompatibleChat,
-  },
-];
+// Katalog provideru je jediny v `_shared/llm-providers.ts` - aby se nevyskytoval
+// na dvou mistech. Adaptery `chat` zustavaji tady, jsou napojene na nastroje.
+const OWN_PROVIDERS: ProviderCfg[] = PROVIDERS.map((provider) => ({
+  id: provider.id,
+  keyEnvs: provider.keyEnvs,
+  base: provider.base,
+  models: provider.models,
+  chat: provider.id === "gemini" ? geminiChat : openaiCompatibleChat,
+}));
+
+/**
+ * Vlastni poskytovatel a klic uzivatele.
+ *
+ * Ucet Temney zde zadny radek nema - jede na sdilenych serverovych klicech a
+ * chova se presne jako predtim. Ostatni ucty si v Nastaveni vyberou poskytovatele
+ * a vlozi vlastni klic; ten ma prednost pred `keyEnvs`, aby se jeho vyber
+ * opravdu pouzival a neprevazil o nejakej sdileny klice projektu.
+ *
+ * Klic se cte service klientem z tabulky bez jedine client policy a nikdy se
+ * neloguje ani nevraci do klienta.
+ */
+type UserProvider = { provider: ProviderCfg; key: string; model: string | null };
+
+async function userProvider(admin: any, userId: string): Promise<UserProvider | null> {
+  const resolved = await resolveUserProvider(admin, userId);
+  if (!resolved) return null;
+  return {
+    ...resolved,
+    provider: { ...resolved.provider, chat: resolved.provider.id === "gemini" ? geminiChat : openaiCompatibleChat } as ProviderCfg,
+  };
+}
+
+/** Klic pro providera: u vlastniho je v radku, jinak hledany v prostredi. */
+function keyForProvider(
+  provider: ProviderCfg,
+  own: UserProvider | null,
+  envKeys: () => Record<string, string | undefined>,
+): string | undefined {
+  if (own && provider.id === own.provider.id) return own.key;
+  return provider.keyEnvs.map((entry) => envKeys()[entry]).find(Boolean);
+}
 
 async function llm(
+  admin: any,
+  userId: string,
   system: string,
   msgs: LlmMessage[],
   toolDefs: unknown[],
   withTools = true,
 ): Promise<LlmResult> {
   const failures: string[] = [];
-  for (const provider of PROVIDERS) {
-    const key = provider.keyEnvs.map((entry) => Deno.env.get(entry)).find(
-      Boolean,
-    );
+  const own = await userProvider(admin, userId);
+  for (const provider of own ? [own.provider, ...OWN_PROVIDERS.filter((p) => p.id !== own.provider.id)] : OWN_PROVIDERS) {
+    const key = keyForProvider(provider, own, envKeys);
     if (!key) {
       failures.push(`${provider.id}:no-key`);
       continue;
     }
-    for (const model of provider.models) {
+    for (const model of own && provider.id === own.provider.id && own.model ? [own.model] : provider.models) {
       try {
         const result = await ask(
           provider,
@@ -898,6 +910,8 @@ async function dispatch(
       "id,title,lyrics,style_prompt",
     );
     const answer = await llm(
+      admin,
+      userId,
       `Extract exactly 3-6 concise visual motifs for Temney from the lyric. Return only a JSON array of strings. Character bible: ${CHARACTER_BIBLE}`,
       [{
         role: "user",
@@ -1069,6 +1083,8 @@ async function dispatch(
       "id,title,lyrics,style_prompt",
     );
     const answer = await llm(
+      admin,
+      userId,
       "Create YouTube metadata in Czech for Temney. Return JSON with title (max 100 chars), description (max 4500 chars), tags (array of max 15 short strings). No claims not supported by the input.",
       [{
         role: "user",
@@ -1249,10 +1265,18 @@ async function dispatch(
       : "image/jpeg";
     const b64 = toBase64(bytes);
 
-    const vp = visionProvider(PROVIDERS, envKeys());
+    // Vision umí jen Gemini (`visionProvider` v motion-recipe.ts hledá
+    // `p.id === "gemini"`). Když má uživatel uložený vlastní klíč právě pro
+    // Gemini, má přednost; jinak se použije sdílený klíč projektu jako dosud.
+    const ownVision = await userProvider(admin, userId);
+    const visionEnv: Record<string, string | undefined> = { ...envKeys() };
+    if (ownVision?.provider.id === "gemini") {
+      visionEnv[ownVision.provider.keyEnvs[0]] = ownVision.key;
+    }
+    const vp = visionProvider(OWN_PROVIDERS, visionEnv);
     if (!vp) {
       throw new Error(
-        "Bez GOOGLE_AI_STUDIO_KEY nelze napsat plán pohybu, protože agent potřebuje vidět obrázek.",
+        "Bez použitelného API klíče nelze napsat plán pohybu, protože agent potřebuje vidět obrázek.",
       );
     }
     const planned = await planMotion({
@@ -1768,7 +1792,7 @@ VIDEO — pravidla, která nesmíš porušit:
   let finalText = "";
   const pending: unknown[] = [];
   for (let step = 0; step < 6; step += 1) {
-    const response = await llm(system, contents, toolDefs, true);
+    const response = await llm(admin, user.id, system, contents, toolDefs, true);
     const calls = response.calls.map((call) => ({
       ...call,
       id: call.id ?? crypto.randomUUID(),
