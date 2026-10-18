@@ -11,6 +11,7 @@ import { useAuth } from "@/hooks/use-auth";
 import { useColors } from "@/hooks/use-colors";
 import { trpc } from "@/lib/trpc";
 import { Radius, Type } from "@/lib/design-tokens";
+import { scrollIndicator } from "@/lib/scroll";
 
 export default function HomeScreen() {
   const colors = useColors();
@@ -52,7 +53,7 @@ export default function HomeScreen() {
     <FlatList
       data={recent}
       keyExtractor={(item) => String(item.id)}
-      showsVerticalScrollIndicator={false}
+      showsVerticalScrollIndicator={scrollIndicator()}
       contentContainerStyle={styles.content}
       refreshing={snapshot.isFetching}
       onRefresh={onRefresh}
@@ -119,7 +120,7 @@ function AttentionCard({ icon, value, label, color, onPress }: { icon: Component
 }
 
 const styles = StyleSheet.create({
-  content: { paddingTop: 14, paddingBottom: 36, gap: 12 },
+  content: { flexGrow: 1, paddingTop: 14, paddingBottom: 36, gap: 12 },
   topRow: { flexDirection: "row", alignItems: "flex-start" },
   syncButton: { width: 44, height: 44, borderRadius: Radius.sm, borderWidth: 1, alignItems: "center", justifyContent: "center", marginTop: 5, marginLeft: 8 },
   syncLine: { flexDirection: "row", alignItems: "center", gap: 7, marginTop: -4, marginBottom: 2 },

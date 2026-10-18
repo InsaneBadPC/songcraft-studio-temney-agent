@@ -23,8 +23,13 @@ export function ScreenContainer({
   ...props
 }: ScreenContainerProps) {
   const colors = useColors();
+  // Na webu drží celý scroll tento kontejner a jeho `flex:1` závisí na CSS
+  // třídě `.flex-1`. Kdyby se ta třída v exportovaném CSS ztratila, celá
+  // stránka přestane scrollovat a `body{overflow:hidden}` z toho nežádný
+  // scroll nevytáhne - dokument prostě nesmyká. Proto je flex i v inline
+  // stylu, kde ho žádný CSS soubor nepřepíše.
   return (
-    <View className={cn("flex-1", containerClassName)} style={[{ backgroundColor: colors.background }, style]} {...props}>
+    <View className={cn("flex-1", containerClassName)} style={[{ flex: 1, backgroundColor: colors.background }, style]} {...props}>
       {/* Jeden zklidneny akcentovy glow odev, ne plocha. */}
       <LinearGradient
         colors={[alpha(colors.primary, 0.13), alpha(colors.primary, 0.04), "transparent"]}
@@ -48,7 +53,7 @@ export function ScreenContainer({
       />
       <View style={{ position: "absolute", top: 0, left: 0, right: 0, height: 1, backgroundColor: Hairline }} pointerEvents="none" />
       <SafeAreaView edges={edges} className={cn("flex-1", safeAreaClassName)} style={{ flex: 1 }}>
-        <View className={cn("flex-1", className)}>{children}</View>
+        <View className={cn("flex-1", className)} style={{ flex: 1 }}>{children}</View>
       </SafeAreaView>
     </View>
   );

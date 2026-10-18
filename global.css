@@ -1,3 +1,50 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+/*
+ * Webová scrollovací lišta.
+ *
+ * Expo vstřikuje do stránky `body{overflow:hidden}` (viz `expo-reset` v
+ * dist/index.html), takže se dokument nikdy nescrolluje - posouvá se jen
+ * obsah uvnitř ScrollView. My jsme dřív na všech listech měli
+ * `showsVerticalScrollIndicator={false}`, což na webu znamená
+ * `scrollbar-width:none` + `::-webkit-scrollbar{display:none}`. Scroll
+ * fungoval, ale nebylo po něm vidět, a uživatel hlásil "nejde scrollovat".
+ *
+ * Tady se lišta vrátí. Šířka je užší než systémová a barva ladí s designem,
+ * aby nepřekážela - ale je vidět, že má smysl scrollovat.
+ */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(148, 163, 184, 0.45) transparent;
+}
+
+*::-webkit-scrollbar {
+  width: 9px;
+  height: 9px;
+}
+
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+*::-webkit-scrollbar-thumb {
+  background-color: rgba(148, 163, 184, 0.45);
+  border-radius: 9999px;
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
+
+*::-webkit-scrollbar-thumb:hover {
+  background-color: rgba(148, 163, 184, 0.7);
+}
+
+/*
+ * Když je ScrollView právě myšlí - iOS/Android to zdůrazňují, prohlížeč
+ * v takovém prvku nechá lištu na chvíli zmizet. Bez toho se na webu lišta
+ * při prvním pohybu schová a je to stejný problém, který jsme řešili výše.
+ */
+:focus-within *::-webkit-scrollbar-thumb {
+  background-color: rgba(148, 163, 184, 0.7);
+}

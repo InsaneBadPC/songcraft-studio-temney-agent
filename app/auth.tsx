@@ -1,11 +1,12 @@
 import MaterialIcons from "@expo/vector-icons/MaterialIcons";
 import { router } from "expo-router";
 import { useState } from "react";
-import { Alert, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
+import { Alert, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 
 import { ScreenContainer } from "@/components/screen-container";
 import { useColors } from "@/hooks/use-colors";
 import { supabase } from "@/lib/supabase";
+import { scrollIndicator } from "@/lib/scroll";
 import { OnPrimary, Radius, Type } from "@/lib/design-tokens";
 
 const PRIVATE_ACCOUNTS = [
@@ -42,8 +43,18 @@ export default function AuthScreen() {
   };
 
   return (
-    <ScreenContainer className="p-5 justify-center">
-      <View style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+    <ScreenContainer>
+      {/* Bez tohoto ScrollView se karta v kratším okně useřízne a tlačítko
+          „Přihlásit se" je nedostupné. Expo na webu dává body overflow:hidden,
+          takže stránka samotná neposkytuje žádný fallback scroll. flexGrow na
+          contentu (styles.scroll) drží obsah ve výšce kontejneru, když je
+          kratší - bez toho se na webu justify-center posouvá do nesmyslů. */}
+      <ScrollView
+        contentContainerStyle={styles.scroll}
+        keyboardShouldPersistTaps="handled"
+        showsVerticalScrollIndicator={scrollIndicator()}
+      >
+        <View style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.border }]}>
         <View style={[styles.icon, { backgroundColor: `${colors.primary}25` }]}>
           <MaterialIcons name="lock-person" size={29} color={colors.primary} />
         </View>
@@ -95,12 +106,18 @@ export default function AuthScreen() {
           <Text style={styles.primaryText}>{loading ? "Ověřuji…" : `Přihlásit se jako ${selectedAccount.name}`}</Text>
         </Pressable>
         <Text style={[styles.note, { color: colors.muted }]}>Přístup je omezený na Temney, DJ Palačinku, Verču a Wednesday. Nové účty nelze vytvářet.</Text>
-      </View>
+        </View>
+      </ScrollView>
     </ScreenContainer>
   );
 }
 
 const styles = StyleSheet.create({
+  // flexGrow řeší centrování: obsah vyplní výšku kontejneru a vycentruje se,
+  // když je kratší než okno, a přeteče, když je delší. Bez toho by na webu
+  // (kde ScrollView contentu flexGrow nedává) justify-center viselo nahoře
+  // nebo pod zawřítkem.
+  scroll: { flexGrow: 1, padding: 20, justifyContent: "center" },
   card: { borderWidth: 1, borderRadius: Radius.xl, padding: 20, gap: 12 },
   icon: { width: 58, height: 58, borderRadius: Radius.lg, alignItems: "center", justifyContent: "center" },
   title: { fontSize: Type.title.fontSize, lineHeight: Type.title.lineHeight, fontWeight: "900", marginTop: 4 },

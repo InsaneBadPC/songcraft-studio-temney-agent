@@ -28,6 +28,7 @@ import {
   type VideoModeDefinition,
 } from "@/lib/video-modes";
 import { getVideoDownloadUrl, listVideoJobs, type StudioVideoJob } from "@/lib/video-jobs";
+import { scrollIndicator } from "@/lib/scroll";
 
 /** Obál alba nahoře i dole. Změna musí být v gallery-engine.mjs. */
 const COVER_SECONDS = 3;
@@ -267,7 +268,7 @@ useEffect(() => {
     return (
       <ScreenContainer className="px-5">
         <ScrollView
-          showsVerticalScrollIndicator={false}
+          showsVerticalScrollIndicator={scrollIndicator()}
           contentContainerStyle={[styles.content, { paddingBottom: insets.bottom + 96 }]}
         >
           <View style={styles.stack}>
@@ -334,7 +335,7 @@ useEffect(() => {
           prázdným `data` by vyžadoval renderItem a TS by to odmítl.
         */}
         <ScrollView
-          showsVerticalScrollIndicator={false}
+          showsVerticalScrollIndicator={scrollIndicator()}
           contentContainerStyle={[styles.content, { paddingBottom: insets.bottom + 96 }]}
           refreshControl={
             <RefreshControl
@@ -505,7 +506,7 @@ useEffect(() => {
         <FlatList
           data={songs}
           keyExtractor={(item) => String(item.id)}
-          showsVerticalScrollIndicator={false}
+          showsVerticalScrollIndicator={scrollIndicator()}
           contentContainerStyle={[styles.content, { paddingBottom: insets.bottom + 96 }]}
           refreshControl={
             <RefreshControl
@@ -641,7 +642,7 @@ useEffect(() => {
       <FlatList
         data={jobs}
         keyExtractor={(item) => String(item.id)}
-        showsVerticalScrollIndicator={false}
+        showsVerticalScrollIndicator={scrollIndicator()}
         contentContainerStyle={[styles.content, { paddingBottom: insets.bottom + 96 }]}
         refreshControl={
           <RefreshControl
@@ -732,7 +733,7 @@ useEffect(() => {
 }
 
 const styles = StyleSheet.create({
-  content: { paddingTop: 14, paddingBottom: 36, gap: 12 },
+  content: { flexGrow: 1, paddingTop: 14, paddingBottom: 36, gap: 12 },
   stack: { gap: Space.md },
   spacer: { height: Space.xs },
   intro: { lineHeight: 21 },

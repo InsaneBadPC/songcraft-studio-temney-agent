@@ -14,6 +14,7 @@ import { useAuth } from "@/hooks/use-auth";
 import { useColors } from "@/hooks/use-colors";
 import { trpc } from "@/lib/trpc";
 import { Radius, Type } from "@/lib/design-tokens";
+import { scrollIndicator } from "@/lib/scroll";
 
 export default function LibraryScreen() {
   const colors = useColors();
@@ -79,7 +80,7 @@ export default function LibraryScreen() {
       <Animated.FlatList
         data={songs}
         keyExtractor={(item) => String(item.id)}
-        showsVerticalScrollIndicator={false}
+        showsVerticalScrollIndicator={scrollIndicator()}
         contentContainerStyle={[styles.content, { paddingBottom: insets.bottom + 96 }]}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.primary} colors={[colors.primary]} progressBackgroundColor={colors.surface} />}
         ListHeaderComponent={
@@ -184,7 +185,7 @@ export default function LibraryScreen() {
 }
 
 const styles = StyleSheet.create({
-  content: { paddingTop: 14 },
+  content: { flexGrow: 1, paddingTop: 14 },
   headerActions: { flexDirection: "row", alignItems: "center", gap: 8 },
   fabGradient: { width: 44, height: 44, borderRadius: Radius.sm, alignItems: "center", justifyContent: "center" },
   search: { height: 48, borderRadius: Radius.md, borderWidth: 1, paddingHorizontal: 14, flexDirection: "row", alignItems: "center", gap: 10, marginTop: 4 },

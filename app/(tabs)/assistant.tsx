@@ -17,6 +17,7 @@ import { MAX_ASSISTANT_CONVERSATIONS, upsertAssistantConversation, type Assistan
 import { useAuth } from "@/hooks/use-auth";
 import { useColors } from "@/hooks/use-colors";
 import { OnPrimary, Radius, Type } from "@/lib/design-tokens";
+import { scrollIndicator } from "@/lib/scroll";
 
 const SUGGESTIONS = [
   { icon: "auto-awesome" as const, text: "Navrhni refrén podle mých textů", sub: "Analýza stylu + nálady" },
@@ -238,7 +239,7 @@ export default function AssistantScreen() {
           ref={flatListRef}
           data={messages}
           keyExtractor={(item) => item.id}
-          showsVerticalScrollIndicator={false}
+          showsVerticalScrollIndicator={scrollIndicator()}
           contentContainerStyle={[styles.content, { paddingBottom: 16 }]}
           ListHeaderComponent={listHeader}
           onContentSizeChange={() => flatListRef.current?.scrollToEnd({ animated: true })}
@@ -274,7 +275,7 @@ export default function AssistantScreen() {
 
 const styles = StyleSheet.create({
   grow: { flex: 1 },
-  content: { paddingTop: 14, paddingBottom: 14, gap: 12 },
+  content: { flexGrow: 1, paddingTop: 14, paddingBottom: 14, gap: 12 },
   notice: { flexDirection: "row", gap: 12, borderRadius: Radius.lg, borderWidth: 1, padding: 14, marginBottom: 14, alignItems: "center" },
   noticeIcon: { width: 36, height: 36, borderRadius: Radius.sm, borderWidth: 1, alignItems: "center", justifyContent: "center" },
   noticeText: { flex: 1, ...Type.caption },

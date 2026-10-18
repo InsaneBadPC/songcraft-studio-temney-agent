@@ -16,6 +16,7 @@ import { trpc } from "@/lib/trpc";
 import { firstQueryParam } from "@/lib/query-params";
 import { TextImporter } from "@/components/text-importer";
 import { Radius, Type } from "@/lib/design-tokens";
+import { scrollIndicator } from "@/lib/scroll";
 
 type Phase = "draft" | "album" | "mp3" | "published";
 const phaseMeta = (phase: Phase, colors: any) => {
@@ -73,7 +74,7 @@ export default function TextsScreen() {
       <Animated.FlatList
         data={records}
         keyExtractor={(item) => String(item.id)}
-        showsVerticalScrollIndicator={false}
+        showsVerticalScrollIndicator={scrollIndicator()}
         contentContainerStyle={[styles.content, { paddingBottom: insets.bottom + 96 }]}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.primary} colors={[colors.primary]} progressBackgroundColor={colors.surface} />}
         ListHeaderComponent={<>
@@ -156,7 +157,7 @@ function StatusFilterChip({ active, label, onPress, colors }: { active: boolean;
   return <Pressable onPress={onPress} style={({ pressed }) => [styles.statusChip, { backgroundColor: active ? colors.primary : colors.surface, borderColor: active ? colors.primary : "rgba(255,255,255,0.08)", opacity: pressed?0.85:1, transform:[{scale: pressed?0.97:1}] }]}><Text style={[styles.statusChipText, { color: active ? "#FFFFFF" : colors.foreground }]}>{label}</Text></Pressable>;
 }
 const styles = StyleSheet.create({
-  content: { paddingTop: 14 },
+  content: { flexGrow: 1, paddingTop: 14 },
   headerActions: { flexDirection: "row", gap: 8, alignItems: "center" },
   fabGradient: { width: 44, height: 44, borderRadius: Radius.sm, alignItems: "center", justifyContent: "center" },
   search: { height: 48, borderRadius: Radius.md, borderWidth: 1, paddingHorizontal: 14, flexDirection: "row", alignItems: "center", gap: 10, marginTop: 4 },
