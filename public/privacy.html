@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="cs">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Zásady ochrany osobních údajů — SongCraft Studio</title>
+<style>
+  :root { color-scheme: dark; }
+  body { margin: 0; background: #0f1115; color: #e7e9ee;
+         font: 16px/1.7 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif; }
+  main { max-width: 780px; margin: 0 auto; padding: 40px 20px 80px; }
+  h1 { font-size: 1.7em; margin: 0 0 .2em; }
+  h2 { font-size: 1.15em; margin: 2em 0 .4em; color: #c9b6ff; }
+  a { color: #8ab4ff; }
+  .muted { color: #9aa3b2; font-size: .9em; }
+  ul { padding-left: 1.2em; }
+  code { background: #1b1f2a; padding: .1em .35em; border-radius: 4px; font-size: .9em; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Zásady ochrany osobních údajů</h1>
+  <p class="muted">Aplikace SongCraft Studio · Účinné od 19. 10. 2026</p>
+
+  <p>SongCraft Studio („aplikace“, „my“) je nástroj pro psaní textů, tvorbu hudby
+  a videa a pro jejich publikaci na YouTube kanál uživatele. Tyto zásady popisují,
+  jaká data zpracováváme a proč.</p>
+
+  <h2>1. Jaká data zpracováváme</h2>
+  <ul>
+    <li><strong>Účet:</strong> e-mailovou adresu a přihlašovací údaje (autentizace běží přes Supabase Auth).</li>
+    <li><strong>Tvůj obsah:</strong> texty písní, rozpracované poznámky, nahrávky, obrázky obalů a metadata skladeb (název, album, popis, štítky pro YouTube).</li>
+    <li><strong>Nastavení AI:</strong> zvoleného poskytovatele umělé inteligence a API klíč. Klíč je uložen na serveru, klientovi se zobrazuje pouze informace, že klíč existuje, a jeho poslední čtyři znaky.</li>
+    <li><strong>Přístup k YouTube:</strong> OAuth tokeny vydané společností Google pro tvůj kanál, a to pouze poté, co s tím výslovně souhlasíš.</li>
+  </ul>
+
+  <h2>2. K čemu data používáme</h2>
+  <ul>
+    <li>Poskytování služby — ukládání a zobrazování tvé tvorby.</li>
+    <li>Generování textů, obalů a render videa na tvůj pokyn.</li>
+    <li>Nahrávání videí na <em>tvůj vlastní</em> YouTube kanál a zařazování do playlistů, které si zvolíš.</li>
+    <li>Načítání statistik tvého YouTube kanálu (pouze pro zobrazení v aplikaci).</li>
+  </ul>
+
+  <h2>3. S kým data sdílíme</h2>
+  <ul>
+    <li><strong>Supabase</strong> — hostování databáze a úložiště souborů.</li>
+    <li><strong>Google / YouTube</strong> — nahrávání videí a načítání statistik, výhradně na tvůj pokyn a s tvým souhlasem.</li>
+    <li><strong>Zvolený poskytovatel AI</strong> (Google AI Studio, OpenRouter, Groq, Cerebras, SambaNova, DeepSeek) — odesíláme mu text zadání potřebný ke generování. Poskytovatele si volíš sám a používá se klíč, který jsi zadal.</li>
+    <li><strong>Renderovací server</strong> — zpracovává video soubory, které sám vytvoříš.</li>
+  </ul>
+  <p>Data neprodáváme a nepoužíváme k reklamě.</p>
+
+  <h2>4. Uchovávání a smazání</h2>
+  <p>Data uchováváme, dokud máš účet. Smazáním skladby, alba nebo účtu se odpovídající
+  data odstraní; tokeny YouTube můžeš kdykoli odvolat v nastavení svého Google účtu
+  (Bezpečnost → Aplikace třetích stran).</p>
+
+  <h2>5. Tvá práva</h2>
+  <p>Máš právo na přístup ke svým datům, jejich opravu, výmaz a přenositelnost.
+  V případě dotazu nebo žádosti nás kontaktuj na adrese níže.</p>
+
+  <h2>6. Soubory cookie a místní úložiště</h2>
+  <p>Aplikace používá místní úložiště prohlížeče/zařízení a přihlašovací relaci,
+  aby tě udržel přihlášeného. Nepoužíváme reklamní ani sledovací cookies.</p>
+
+  <h2>7. Změny zásad</h2>
+  <p>Zásady můžeme aktualizovat. O podstatných změnách tě budeme informovat v aplikaci.</p>
+
+  <h2>8. Kontakt</h2>
+  <p>E-mail: <a href="mailto:insanebad2@gmail.com">insanebad2@gmail.com</a></p>
+</main>
+</body>
+</html>
