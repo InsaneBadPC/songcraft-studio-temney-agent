@@ -9,6 +9,12 @@ import {
 } from "../_shared/access.ts";
 import { describeRecipe, planMotion, visionProvider } from "./motion-recipe.ts";
 import { PROVIDERS, resolveUserProvider } from "../_shared/llm-providers.ts";
+import {
+  buildYoutubeDescription,
+  buildYoutubeTags,
+  buildYoutubeTitle,
+  type YoutubeMetadataInput,
+} from "../_shared/youtube-metadata.ts";
 
 const cors = {
   "Access-Control-Allow-Origin": "*",
@@ -1621,7 +1627,7 @@ function pendingOp(op: { id: string; kind: string; summary: string; token: strin
       "sc_songs",
       String(args.songId),
       userId,
-      "id,title,cover_path",
+      "id,title,cover_path,album_id,lyrics,style_prompts",
     );
     const requestedVideoId = clip(args.videoId, 80);
     // 16:9 do playlistu, 9:16 na Shorts. Bez tohoto se vybralo prostě "nejnovější
@@ -1673,12 +1679,42 @@ function pendingOp(op: { id: string; kind: string; summary: string; token: strin
     const suggested = typeof args.scheduledAt === "string" && args.scheduledAt
       ? args.scheduledAt
       : new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
+    // Album pro popis a tagy (název, ne id). Když chybí, metadata se bez něj složí.
+    let albumName: string | null = null;
+    let albumPlaylistId: string | null = null;
+    if (song.album_id) {
+      const { data: album } = await admin.from("sc_albums")
+        .select("name,youtube_playlist_id")
+        .eq("id", song.album_id).eq("user_id", userId).maybeSingle();
+      albumName = album?.name ?? null;
+      albumPlaylistId = album?.youtube_playlist_id ?? null;
+    }
+    // Shorts se do playlistu alba nezařazují - mají vlastní cestu.
+    const playlistIds = !wantsShorts && albumPlaylistId ? [albumPlaylistId] : [];
+    // Název, popis a tagy skládá jeden sdílený modul, aby publikace z agenta
+    // vypadala stejně jako z běžného uživatelského toku. Dřív se ukládal jen
+    // název a popis s tagy zůstaly prázdné - video se pak nahrálo "na prázdno".
+    const metaInput: YoutubeMetadataInput = {
+      title: song.title,
+      album: albumName,
+      lyrics: song.lyrics ?? null,
+      stylePrompts: Array.isArray(song.style_prompts) ? song.style_prompts : [],
+      videoKind: wantsShorts ? "shorts" : "video",
+    };
+    const metadata = {
+      title: clip(args.title, 100) || buildYoutubeTitle(metaInput),
+      description: buildYoutubeDescription(metaInput),
+      tags: buildYoutubeTags(metaInput),
+    };
     const { data, error } = await admin.from("youtube_publications").insert({
       user_id: userId,
       song_id: song.id,
       video_id: video.id,
-      title: clip(args.title, 100) || `Temney – ${song.title}`,
+      title: metadata.title,
+      description: metadata.description,
+      tags: metadata.tags,
       thumbnail_path: song.cover_path,
+      playlist_ids: playlistIds,
       scheduled_at: suggested,
       status: "draft",
       privacy_status: "private",

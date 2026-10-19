@@ -1,6 +1,7 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "jsr:@supabase/supabase-js@2";
 import { isAllowedPrivateUser, privateAccessMessage } from "../_shared/access.ts";
+import { buildSimpleSrt } from "../_shared/youtube-metadata.ts";
 
 const cors = {
   "Access-Control-Allow-Origin": "*",
@@ -67,6 +68,93 @@ function normalizedTags(value: unknown) {
   return Array.isArray(value) ? value.map((tag) => clip(tag, 30)).filter(Boolean).slice(0, 15) : [];
 }
 
+/**
+ * Doplňkové kroky po nahrání videa. Všechno je "best effort": když jeden krok
+ * selže (třeba chybí scope), video už je nahrané a nesmí se kvůli tomu zahodit.
+ * Každý krok se proto loguje zvlášť a chyba se vrací jako seznam, ne výjimka.
+ */
+async function afterUpload(admin: any, userId: string, accessToken: string, videoId: string, ctx: {
+  thumbnailUrl?: string | null;
+  captionsSrt?: string | null;
+  captionsLanguage?: string;
+  playlistIds?: string[];
+  comment?: string | null;
+}) {
+  const results: Record<string, string> = {};
+  const auth = { Authorization: `Bearer ${accessToken}` };
+
+  if (ctx.thumbnailUrl) {
+    try {
+      const image = await fetch(ctx.thumbnailUrl, { signal: AbortSignal.timeout(60_000) });
+      if (!image.ok) throw new Error(`obrázek ${image.status}`);
+      const blob = await image.blob();
+      const form = new FormData();
+      form.append("metadata", new Blob([JSON.stringify({})], { type: "application/json" }));
+      form.append("file", blob, "thumbnail.jpg");
+      const response = await fetch(
+        `https://www.googleapis.com/upload/youtube/v3/thumbnails/set?videoId=${encodeURIComponent(videoId)}`,
+        { method: "POST", headers: auth, body: form, signal: AbortSignal.timeout(60_000) },
+      );
+      if (!response.ok) throw new Error(`thumbnails.set ${response.status}`);
+      results.thumbnail = "ok";
+    } catch (error) {
+      results.thumbnail = error instanceof Error ? error.message : "chyba";
+    }
+  }
+
+  if (ctx.captionsSrt && ctx.captionsSrt.trim()) {
+    try {
+      const language = ctx.captionsLanguage || "cs";
+      const meta = JSON.stringify({ snippet: { videoId, language, name: "Čeština", isDraft: false } });
+      const form = new FormData();
+      form.append("metadata", new Blob([meta], { type: "application/json" }));
+      form.append("file", new Blob([ctx.captionsSrt], { type: "application/octet-stream" }), `${language}.srt`);
+      const response = await fetch(
+        "https://www.googleapis.com/upload/youtube/v3/captions?uploadType=multipart&part=snippet",
+        { method: "POST", headers: auth, body: form, signal: AbortSignal.timeout(60_000) },
+      );
+      if (!response.ok) throw new Error(`captions.insert ${response.status}`);
+      results.captions = "ok";
+    } catch (error) {
+      results.captions = error instanceof Error ? error.message : "chyba";
+    }
+  }
+
+  for (const playlistId of ctx.playlistIds ?? []) {
+    try {
+      const response = await fetch("https://www.googleapis.com/youtube/v3/playlistItems?part=snippet", {
+        method: "POST",
+        headers: { ...auth, "Content-Type": "application/json" },
+        body: JSON.stringify({ snippet: { playlistId, resourceId: { kind: "youtube#video", videoId } } }),
+        signal: AbortSignal.timeout(30_000),
+      });
+      if (!response.ok) throw new Error(`playlistItems.insert ${response.status}`);
+      results[`playlist:${playlistId}`] = "ok";
+    } catch (error) {
+      results[`playlist:${playlistId}`] = error instanceof Error ? error.message : "chyba";
+    }
+  }
+
+  if (ctx.comment && ctx.comment.trim()) {
+    try {
+      const response = await fetch("https://www.googleapis.com/youtube/v3/commentThreads?part=snippet", {
+        method: "POST",
+        headers: { ...auth, "Content-Type": "application/json" },
+        body: JSON.stringify({
+          snippet: { videoId, topLevelComment: { snippet: { textOriginal: clip(ctx.comment, 1_900) } } },
+        }),
+        signal: AbortSignal.timeout(30_000),
+      });
+      if (!response.ok) throw new Error(`commentThreads.insert ${response.status}`);
+      results.comment = "ok";
+    } catch (error) {
+      results.comment = error instanceof Error ? error.message : "chyba";
+    }
+  }
+
+  return results;
+}
+
 Deno.serve(async (request) => {
   if (request.method === "OPTIONS") return new Response("ok", { headers: cors });
   if (request.method !== "POST") return json({ error: "Použij POST." }, 405);
@@ -105,7 +193,7 @@ Deno.serve(async (request) => {
   const payload = (candidate.payload ?? {}) as Record<string, unknown>;
   const publicationId = typeof payload.publicationId === "string" ? payload.publicationId : "";
   if (!uuid.test(publicationId)) return json({ error: "Potvrzení neobsahuje platnou publikaci." }, 400);
-  const { data: publication, error: publicationError } = await admin.from("youtube_publications").select("id,title,description,tags,privacy_status,video_id,status,youtube_video_id,song_id").eq("id", publicationId).eq("user_id", user.id).maybeSingle();
+  const { data: publication, error: publicationError } = await admin.from("youtube_publications").select("id,title,description,tags,privacy_status,video_id,status,youtube_video_id,song_id,thumbnail_path,playlist_ids").eq("id", publicationId).eq("user_id", user.id).maybeSingle();
   if (publicationError || !publication) return json({ error: "Draft publikace nebyl nalezen." }, 404);
 
   // Metadata is bound at confirmation time. Any drift requires a fresh review.
@@ -132,7 +220,7 @@ Deno.serve(async (request) => {
 
   if (publication.status === "published" && publication.youtube_video_id) return json({ status: "published", youtubeVideoId: publication.youtube_video_id, idempotent: true });
   if (!publication.video_id) return json({ error: "Draft nemá připravené video. Nejprve spusť render." }, 400);
-  const { data: video } = await admin.from("agent_videos").select("id,storage_path,render_status").eq("id", publication.video_id).eq("user_id", user.id).maybeSingle();
+  const { data: video } = await admin.from("agent_videos").select("id,storage_path,render_status,duration_seconds").eq("id", publication.video_id).eq("user_id", user.id).maybeSingle();
   const videoPath = ownedPath(user.id, video?.storage_path);
   if (!video || video.render_status !== "ready" || !videoPath) return json({ error: "Video ještě není připravené pro upload." }, 409);
 
@@ -182,6 +270,30 @@ Deno.serve(async (request) => {
     const { error: updateError } = await admin.from("youtube_publications").update({ status: "published", youtube_video_id: result.id, published_at: publishedAt, error_message: null }).eq("id", publication.id).eq("user_id", user.id);
     if (updateError) throw new Error("Video bylo nahráno, ale stav publikace se nepodařilo uložit.");
     if (publication.song_id) await admin.from("sc_songs").update({ is_published: true, published_video_id: result.id, published_at: publishedAt }).eq("id", publication.song_id).eq("user_id", user.id);
+
+    // Doplňky po nahrání: miniatura, titulky, playlist, připnutý komentář.
+    // Video už je venku, takže případná chyba nesmí shodit publikaci - jen se
+    // zapíše do logu.
+    try {
+      const songMeta = publication.song_id
+        ? (await admin.from("sc_songs").select("lyrics,title").eq("id", publication.song_id).eq("user_id", user.id).maybeSingle()).data
+        : null;
+      const durationSeconds = Number(video.duration_seconds ?? 0) || 0;
+      const captionsSrt = songMeta?.lyrics ? buildSimpleSrt(songMeta.lyrics, durationSeconds) : null;
+      const thumbnailUrl = publication.thumbnail_path
+        ? await signedVideoUrl(url, serviceKey, publication.thumbnail_path).catch(() => null)
+        : null;
+      const playlistIds = Array.isArray(publication.playlist_ids) ? publication.playlist_ids.filter((id: unknown) => typeof id === "string" && id.length > 0) : [];
+      const comment = songMeta?.title
+        ? `Který verš z „${songMeta.title}" ti sedí nejvíc? Napiš do komentáře 👇\n\n▸ Celé video najdeš v odkazu výše.`
+        : null;
+      const extras = await afterUpload(admin, user.id, accessToken, result.id, { thumbnailUrl, captionsSrt, playlistIds, comment });
+      await admin.from("agent_action_log").insert({ user_id: user.id, action_type: "publish_to_youtube_extras", target_id: publication.id, payload: { youtubeVideoId: result.id, extras }, result: Object.values(extras).every((v) => v === "ok") ? "success" : "partial" });
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : "chyba doplňků";
+      await admin.from("agent_action_log").insert({ user_id: user.id, action_type: "publish_to_youtube_extras", target_id: publication.id, payload: { youtubeVideoId: result.id, error: detail.slice(0, 500) }, result: "error" });
+    }
+
     await admin.from("agent_action_log").insert({ user_id: user.id, action_type: "publish_to_youtube", target_id: publication.id, payload: { youtubeVideoId: result.id, confirmationId }, result: "success" });
     return json({ status: "published", youtubeVideoId: result.id });
   } catch (error) {

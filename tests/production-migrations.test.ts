@@ -7,6 +7,7 @@ const oauth = readFileSync("supabase/migrations/20260925150000_youtube_oauth_sta
 const leases = readFileSync("supabase/migrations/20260925140000_video_worker_leases.sql", "utf8");
 const videoLoop = readFileSync("supabase/migrations/20260928120000_agent_video_loop_mode.sql", "utf8");
 const sourceLoop = readFileSync("supabase/migrations/20260929000000_agent_video_source_loop.sql", "utf8");
+const albumPlaylist = readFileSync("supabase/migrations/20261019000000_album_youtube_playlist.sql", "utf8");
 
 describe("production workflow migrations", () => {
   it("targets the render type constraint by column, not by text matching", () => {
@@ -60,6 +61,13 @@ describe("production workflow migrations", () => {
     // staré hodnoty agenta se přemapují, ne zůstanou viset
     expect(sourceLoop).toContain("set mode = 'source_loop', type = 'source_loop'");
     expect(sourceLoop).toContain("raise exception");
+  });
+
+  it("maps each album to its YouTube playlist with a validated format", () => {
+    expect(albumPlaylist).toContain("add column if not exists youtube_playlist_id text");
+    expect(albumPlaylist).toContain("sc_albums_youtube_playlist_id_format");
+    expect(albumPlaylist).toContain("^PL[A-Za-z0-9_-]{10,40}$");
+    expect(albumPlaylist).toContain("PLe8kaulECxw0");
   });
 
   it("never names a SQL function parameter after a reserved word", () => {
