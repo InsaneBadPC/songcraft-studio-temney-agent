@@ -35,8 +35,10 @@ describe("vlastní API klíč uživatele nesmí nikam odejít", () => {
     expect(aiSettings).toContain('select("provider,model,key_hint,key_verified_at,last_error,updated_at")');
     // Klíč se čte jen ve dvou místech a ani jedno není odpověď pro klienta:
     // sdílený resolver (předat do volání modelu) a ověření v list_models.
-    const reads = (aiSettings.match(/select\("[^"]*api_key[^"]*"\)/g) ?? [])
-      .concat(catalog.match(/select\("[^"]*api_key[^"]*"\)/g) ?? []);
+    const reads: string[] = [
+      ...(aiSettings.match(/select\("[^"]*api_key[^"]*"\)/g) ?? []),
+      ...(catalog.match(/select\("[^"]*api_key[^"]*"\)/g) ?? []),
+    ];
     expect(reads.length).toBeGreaterThan(0);
     for (const read of reads) {
       expect(read).not.toContain("key_hint");
