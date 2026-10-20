@@ -72,3 +72,6 @@ dist-web/
 
 # Artifakty Supabase CLI - obsahuji projektovy ref, nesmi do repa
 supabase/.temp/
+
+# Instrukce a navody (lokalni)
+Instrukce_navod/
