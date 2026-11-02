@@ -139,8 +139,8 @@ const config: ExpoConfig = {
     ],
   ],
   experiments: {
-    // GitHub Pages serves this repository below /songcraft-studio.
-    baseUrl: "/songcraft-studio",
+    // GitHub Pages serves this repository below its repository name.
+    baseUrl: "/songcraft-studio-temney-agent",
     typedRoutes: true,
     reactCompiler: true,
   },
