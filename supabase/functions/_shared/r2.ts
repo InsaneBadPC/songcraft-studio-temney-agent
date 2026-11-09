@@ -9,7 +9,7 @@
 
 const encoder = new TextEncoder();
 
-function hex(buffer: ArrayBuffer): string {
+function hex(buffer: ArrayBuffer | Uint8Array): string {
   return [...new Uint8Array(buffer)].map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 
@@ -18,9 +18,12 @@ async function sha256Hex(value: string): Promise<string> {
 }
 
 async function hmac(key: Uint8Array | string, value: string): Promise<Uint8Array> {
+  // `new Uint8Array(...)` zaručí vlastní ArrayBuffer i pro SharedArrayBuffer
+  // a starší Deno typy, které `importKey` nepřijímají přímo.
+  const rawKey = new Uint8Array(typeof key === "string" ? encoder.encode(key) : key);
   const cryptoKey = await crypto.subtle.importKey(
     "raw",
-    typeof key === "string" ? encoder.encode(key) : key,
+    rawKey,
     { name: "HMAC", hash: "SHA-256" },
     false,
     ["sign"],
