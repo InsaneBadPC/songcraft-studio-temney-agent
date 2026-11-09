@@ -117,7 +117,7 @@ const assert = <T>(data: T | null, error: { message: string } | null): T => {
 
 const albumFromRow = async (row: any): Promise<StudioAlbum> => ({ id: row.id, userId: row.user_id, name: row.name, description: row.description, releaseYear: row.release_year, coverStorageKey: row.cover_path, coverUrl: await signedUrl(row.cover_path, row.user_id), sortOrder: row.sort_order, createdAt: new Date(row.created_at), updatedAt: new Date(row.updated_at) });
 const documentFromRow = async (row: any): Promise<StudioDocument> => ({ id: row.id, userId: row.user_id, albumId: row.album_id, title: row.title, stylePrompt: row.style_prompt, lyrics: row.lyrics, notes: row.notes, coverStorageKey: row.cover_path, coverUrl: await signedUrl(row.cover_path, row.user_id), status: row.status === "complete" ? "complete" : "draft", completedAt: mapTime(row.completed_at), createdAt: new Date(row.created_at), updatedAt: new Date(row.updated_at) });
-const songFromRow = async (row: any): Promise<StudioSong> => ({ id: row.id, userId: row.user_id, albumId: row.album_id, sourceDocumentId: row.source_lyric_id, title: row.title, stylePrompt: row.style_prompt, stylePrompts: songStylePrompts(row), lyrics: row.lyrics, notes: row.notes, coverStorageKey: row.cover_path, coverUrl: await signedUrl(row.cover_path, row.user_id), sourceVideoStorageKey: row.source_video_path ?? null, youtubeDescription: row.youtube_description ?? null, youtubeTags: row.youtube_tags ?? null, isPublished: Boolean(row.is_published), publishedAt: mapTime(row.published_at), publishedVideoId: row.published_video_id ?? null, completedAt: new Date(row.completed_at), createdAt: new Date(row.created_at), updatedAt: new Date(row.updated_at) });
+const songFromRow = async (row: any, fallbackCoverPath: string | null = null): Promise<StudioSong> => ({ id: row.id, userId: row.user_id, albumId: row.album_id, sourceDocumentId: row.source_lyric_id, title: row.title, stylePrompt: row.style_prompt, stylePrompts: songStylePrompts(row), lyrics: row.lyrics, notes: row.notes, coverStorageKey: row.cover_path, coverUrl: await signedUrl(row.cover_path ?? fallbackCoverPath, row.user_id), sourceVideoStorageKey: row.source_video_path ?? null, youtubeDescription: row.youtube_description ?? null, youtubeTags: row.youtube_tags ?? null, isPublished: Boolean(row.is_published), publishedAt: mapTime(row.published_at), publishedVideoId: row.published_video_id ?? null, completedAt: new Date(row.completed_at), createdAt: new Date(row.created_at), updatedAt: new Date(row.updated_at) });
 const versionFromRow = async (row: any): Promise<StudioVersion> => {
   const storageUrl = await signedUrl(row.storage_path, row.user_id);
   const taggedStorageUrl = await signedUrl(row.tagged_storage_path, row.user_id);
@@ -132,18 +132,26 @@ const songStylePrompts = (row: any): string[] => {
 };
 export async function getExternalStudioSnapshot(): Promise<StudioSnapshot> {
   const user = await owner();
-  const [albums, documents, songs, versions, rhymeWords, stylePrompts] = await Promise.all([
+  const [albums, documents, songs, versions, rhymeWords, stylePrompts, mediaImages] = await Promise.all([
     supabase.from("sc_albums").select("*").eq("user_id", user.id).order("sort_order").order("name"),
     supabase.from("sc_lyrics").select("*").eq("user_id", user.id).order("updated_at", { ascending: false }),
     supabase.from("sc_songs").select("*").eq("user_id", user.id).order("completed_at", { ascending: false }),
     supabase.from("sc_audio_versions").select("*").eq("user_id", user.id).order("is_final", { ascending: false }).order("is_primary", { ascending: false }).order("rating", { ascending: false }),
     supabase.from("sc_rhyme_words").select("*").eq("user_id", user.id).order("word"),
     supabase.from("sc_style_prompts").select("*").eq("user_id", user.id).order("rating", { ascending: false }).order("updated_at", { ascending: false }),
+    supabase.from("sc_song_media").select("song_id,storage_path").eq("user_id", user.id).eq("kind", "image").order("sort_order").order("created_at"),
   ]);
+  // Nahraný obrázek v "Doprovodná média" má přednost před prázdným coverem.
+  // Bere se jen první obrázek na píseň a jen jako zobrazení; cover_path se
+  // nepřepisuje, aby smazání média neposlalo katalog na neexistující soubor.
+  const fallbackCovers = new Map<string, string>();
+  for (const row of assert(mediaImages.data, mediaImages.error)) {
+    if (!fallbackCovers.has(row.song_id)) fallbackCovers.set(row.song_id, row.storage_path);
+  }
   return {
     albums: await Promise.all(assert(albums.data, albums.error).map(albumFromRow)),
     documents: await Promise.all(assert(documents.data, documents.error).map(documentFromRow)),
-    songs: await Promise.all(assert(songs.data, songs.error).map(songFromRow)),
+    songs: await Promise.all(assert(songs.data, songs.error).map((row) => songFromRow(row, fallbackCovers.get(row.id) ?? null))),
     versions: await Promise.all(assert(versions.data, versions.error).map(versionFromRow)),
     rhymeWords: assert(rhymeWords.data, rhymeWords.error).map(rhymeFromRow),
     stylePrompts: assert(stylePrompts.data, stylePrompts.error).map(stylePromptFromRow),

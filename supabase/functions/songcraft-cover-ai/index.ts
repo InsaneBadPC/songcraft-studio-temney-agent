@@ -44,6 +44,19 @@ Deno.serve(async (request) => {
     albumName = album?.name || "Bez alba";
   }
   const youtubeCover = input.format === "youtube_16_9";
+  // Obal se musí uložit i do entity, ne jen do sc_cover_jobs. Dřív 16:9
+  // větev ukládala jen raw soubor do jobu, takže se vygenerovaný obal nikde
+  // nezobrazil. U textu navíc synchronizujeme už vzniklou skladbu.
+  const persistCover = async (entityType: "song" | "lyric" | "album", entityId: string, path: string) => {
+    const target = entityType === "song" ? "sc_songs" : entityType === "album" ? "sc_albums" : "sc_lyrics";
+    const { error } = await admin.from(target).update({ cover_path: path }).eq("id", entityId).eq("user_id", user.id);
+    if (error) return error.message;
+    if (entityType === "lyric") {
+      const { error: songError } = await admin.from("sc_songs").update({ cover_path: path }).eq("source_lyric_id", entityId).eq("user_id", user.id).is("cover_path", null);
+      if (songError) return songError.message;
+    }
+    return null;
+  };
 
   // Kontrola stavu existující úlohy skládání (po předání do GitHub Actions).
   if (input.action === "check" && input.jobId) {
@@ -108,8 +121,8 @@ Deno.serve(async (request) => {
       const path = `${user.id}/covers/generated/${input.entityType}-${safe(entityTitle)}-${crypto.randomUUID()}.${imageMime.includes("png") ? "png" : imageMime.includes("jpeg") ? "jpg" : "webp"}`;
       const { error: uploadError } = await supabase.storage.from("songcraft").upload(path, imageBytes, { contentType: imageMime, upsert: false });
       if (uploadError) return json({ status: "failed", error: uploadError.message });
-      const { error: updateError } = await admin.from(table).update({ cover_path: path }).eq("id", input.entityId).eq("user_id", user.id);
-      if (updateError) return json({ status: "failed", error: updateError.message });
+      const coverError = await persistCover(input.entityType, input.entityId, path);
+      if (coverError) return json({ status: "failed", error: coverError });
       return json({ status: "completed", coverPath: path });
     }
 
@@ -120,6 +133,8 @@ Deno.serve(async (request) => {
     const rawPath = `${user.id}/covers/raw/${safe(entityTitle)}-${crypto.randomUUID()}.${imageMime.includes("png") ? "png" : imageMime.includes("jpeg") ? "jpg" : "webp"}`;
     const { error: rawUploadError } = await supabase.storage.from("songcraft").upload(rawPath, imageBytes, { contentType: imageMime, upsert: false });
     if (rawUploadError) return json({ status: "failed", error: rawUploadError.message });
+    const coverError = await persistCover(input.entityType, input.entityId, rawPath);
+    if (coverError) return json({ status: "failed", error: coverError });
     await admin.from("sc_cover_jobs").upsert({ id: input.jobId, user_id: user.id, entity_type: input.entityType, entity_id: input.entityId, title: entityTitle, album_name: albumName, status: "completed", cover_path: rawPath, error: "16:9 composer pending; private source stored for safe crop.", updated_at: new Date().toISOString() });
     return json({ status: "completed", coverPath: rawPath, message: "Soukromý zdrojový obal je uložený; zobrazí se bezpečným oříznutím." });
   }

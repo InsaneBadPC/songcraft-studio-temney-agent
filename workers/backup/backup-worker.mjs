@@ -19,15 +19,20 @@
  *   WORK_DIR           výchozí /var/lib/songcraft-studio/work
  *   WORKER_INTERVAL_MS výchozí 30000
  *   RUN_ONCE=1         vyřídit frontu a skončit (testy a ruční běh)
+ *   BACKUP_STORAGE     `supabase` (výchozí) nebo `r2`
+ *   R2_ENDPOINT, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY
+ *   R2_BUCKET          výchozí songcraft-studio
+ *   R2_BACKUP_PREFIX   výchozí backups
  */
 
 import { createWriteStream, createReadStream, existsSync } from "node:fs";
-import { mkdir, rm, writeFile, readFile, readdir, stat } from "node:fs/promises";
+import { mkdir, rm, writeFile, readFile, readdir, stat, open } from "node:fs/promises";
 import { Readable } from "node:stream";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { spawn } from "node:child_process";
 import { pipeline } from "node:stream/promises";
+import { r2FromEnv } from "./r2.mjs";
 
 const url = process.env.SUPABASE_URL;
 const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -90,6 +95,11 @@ const DELETE_ORDER = [
 
 const BUCKET = "songcraft";
 const BACKUP_BUCKET = "songcraft-backups";
+const BACKUP_STORAGE = String(process.env.BACKUP_STORAGE || "supabase").toLowerCase();
+const R2_BACKUP_PREFIX = String(process.env.R2_BACKUP_PREFIX || "backups").replace(/^\/+|\/+$/g, "");
+const r2Backup = BACKUP_STORAGE === "r2"
+  ? r2FromEnv({ bucket: process.env.R2_BACKUP_BUCKET || process.env.R2_BUCKET || "songcraft-studio" })
+  : null;
 const ARCHIVE_FORMAT = "tar.zst";
 
 /**
@@ -113,6 +123,21 @@ async function request(endpoint, options = {}) {
 /** Storage API vyžaduje lomítka v cestě DOSLOVA; encodeURIComponent by je změnilo na %2F → 400. */
 function encodePath(pathname) {
   return pathname.split("/").map(encodeURIComponent).join("/");
+}
+
+/** `r2://bucket/key` → { bucket, key }; jinak null. */
+export function parseR2Path(value) {
+  if (typeof value !== "string" || !value.startsWith("r2://")) return null;
+  const rest = value.slice(5);
+  const slash = rest.indexOf("/");
+  if (slash < 1) return null;
+  return { bucket: rest.slice(0, slash), key: rest.slice(slash + 1) };
+}
+
+function r2Part(base, index) {
+  const parsed = parseR2Path(base);
+  if (!parsed) return null;
+  return { bucket: parsed.bucket, key: partName(parsed.key, index) };
 }
 
 function step(stage, extra = {}) {
@@ -373,7 +398,7 @@ async function runBackup(job) {
     headers: { Prefer: "return=minimal" },
     body: JSON.stringify({
       status: "done",
-      archive_path: jobId,
+      archive_path: r2Backup ? `r2://${r2Backup.bucket}/${R2_BACKUP_PREFIX}/${jobId}` : jobId,
       archive_bytes: archiveStat.size,
       archive_parts: parts,
       manifest: { ...manifest.totals, parts },
@@ -409,10 +434,31 @@ export function partName(base, index) {
 /** Archiv jde do jiného bucketu než uživatelská média, takže má vlastní cestu. */
 async function uploadArchiveParts(base, file, bytes, onProgress) {
   const parts = partCount(bytes);
+  if (r2Backup) {
+    const handle = await open(file, "r");
+    try {
+      for (let index = 0; index < parts; index += 1) {
+        const start = index * PART_SIZE;
+        const end = Math.min(start + PART_SIZE, bytes) - 1;
+        const size = end - start + 1;
+        const buffer = new Uint8Array(size);
+        let offset = 0;
+        while (offset < size) {
+          const { bytesRead } = await handle.read(buffer, offset, size - offset, start + offset);
+          if (bytesRead === 0) throw new Error(`Čtení části ${index + 1}/${parts} skončilo předčasně.`);
+          offset += bytesRead;
+        }
+        await r2Backup.putObject(`${R2_BACKUP_PREFIX}/${partName(base, index)}`, buffer, "application/octet-stream");
+        onProgress?.(index + 1, parts, end + 1);
+      }
+    } finally {
+      await handle.close();
+    }
+    return parts;
+  }
   for (let index = 0; index < parts; index += 1) {
     const start = index * PART_SIZE;
     const end = Math.min(start + PART_SIZE, bytes) - 1;
-    const size = end - start + 1;
     const response = await fetch(`${url}/storage/v1/object/${BACKUP_BUCKET}/${encodePath(partName(base, index))}`, {
       method: "POST",
       headers: { ...headers, "Content-Type": "application/octet-stream", "x-upsert": "true" },
@@ -428,6 +474,20 @@ async function uploadArchiveParts(base, file, bytes, onProgress) {
 /** Při obnově se části spojí v pořadí do jednoho souboru a ten se rozbalí. */
 async function downloadArchiveParts(base, parts, target) {
   const stream = createWriteStream(target);
+  const first = r2Part(base, 0);
+  if (first) {
+    const r2 = r2Backup && r2Backup.bucket === first.bucket ? r2Backup : r2FromEnv({ bucket: first.bucket });
+    try {
+      for (let index = 0; index < parts; index += 1) {
+        const part = r2Part(base, index);
+        const response = await r2.getObject(part.key);
+        await pipeline(Readable.fromWeb(response.body), stream, { end: false });
+      }
+    } finally {
+      await new Promise((resolve, reject) => { stream.end(resolve); stream.on("error", reject); });
+    }
+    return;
+  }
   for (let index = 0; index < parts; index += 1) {
     const response = await fetch(`${url}/storage/v1/object/${BACKUP_BUCKET}/${encodePath(partName(base, index))}`, { headers });
     if (!response.ok) throw new Error(`Stažení části ${index + 1}/${parts} selhalo: HTTP ${response.status}`);
@@ -457,9 +517,14 @@ async function stepRun(stage, task) {
   }
 }
 
+/** Zdrojový účet je v `progress.sourceUserId`; starší úlohy mají jen cíl. */
+export function restoreSourceUserId(job) {
+  return typeof job.progress?.sourceUserId === "string" ? job.progress.sourceUserId : job.target_user_id;
+}
+
 async function runRestore(job) {
   const jobId = job.id;
-  const sourceUserId = typeof job.progress?.sourceUserId === "string" ? job.progress.sourceUserId : job.target_user_id;
+  const sourceUserId = restoreSourceUserId(job);
   const targetUserId = job.target_user_id;
   if (!targetUserId) throw new Error("Obnova nemá cílový účet.");
   if (!job.source_backup_id) throw new Error("Obnova nemá zdrojovou zálohu.");

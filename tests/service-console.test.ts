@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
-import { deleteOrder, joinStoragePath, OWNED_TABLES, PART_SIZE, partCount, partName, planRestore } from "../workers/backup/backup-worker.mjs";
+import { deleteOrder, joinStoragePath, OWNED_TABLES, PART_SIZE, parseR2Path, partCount, partName, planRestore, restoreSourceUserId } from "../workers/backup/backup-worker.mjs";
 
 const migrationAccounts = readFileSync("supabase/migrations/20261015000000_service_console.sql", "utf8");
 const migrationBucket = readFileSync("supabase/migrations/20261015000001_backup_bucket.sql", "utf8");
@@ -110,11 +110,31 @@ describe("archiv patří všem účtům, ale neodnáší cizí tajemství", () =
     // Žádný request nesmí nést celý archiv najednou.
     expect(worker).not.toContain("uploadFromArchive");
   });
+
+  it("archiv umí ležet v R2 a cesta se pozná podle prefixu", () => {
+    expect(parseR2Path("r2://songcraft-studio/backups/abc")).toEqual({ bucket: "songcraft-studio", key: "backups/abc" });
+    expect(parseR2Path("r2://songcraft-studio")).toBeNull();
+    expect(parseR2Path("abc")).toBeNull();
+    expect(worker).toContain("r2://${r2Backup.bucket}");
+    expect(worker).toContain("r2Part(base, index)");
+    expect(console_).toContain("parseR2Path(job.archive_path)");
+    expect(console_).toContain('entry.archive_storage = "r2"');
+  });
 });
 
 describe("obnova dá každému účtu jen jeho vlastní data", () => {
   const SOURCE = "11111111-1111-1111-1111-111111111111";
   const TARGET = "22222222-2222-2222-2222-222222222222";
+
+  it("restore_new si nese zdrojový účet z archivu, ne nový cíl", () => {
+    expect(restoreSourceUserId({ target_user_id: TARGET, progress: { sourceUserId: SOURCE } })).toBe(SOURCE);
+    expect(restoreSourceUserId({ target_user_id: TARGET, progress: {} })).toBe(TARGET);
+    expect(restoreSourceUserId({ target_user_id: TARGET })).toBe(TARGET);
+    expect(console_).toContain("sourceUserIdInput");
+    expect(console_).toContain("restore_new potřebuje sourceUserId");
+    expect(console_).toContain("progress: { sourceUserId }");
+    expect(console_).toContain("payload: { jobId: data.id, mode, sourceUserId, targetUserId: destinationUserId }");
+  });
 
   it("do stejného účtu se data nemapují", () => {
     const plan = planRestore(SOURCE, SOURCE);

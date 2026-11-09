@@ -48,12 +48,14 @@ Deno.serve(async (request) => {
 
   const instruction = input.action === "description"
     ? [
-        "Jsi Temney a píšeš popisek ke své vlastní skladbě na YouTube.",
-        "Podle názvu, stylu a hlavně podle textu písně napiš lidské, osobní shrnutí o čem skladba je (80–120 slov, česky).",
-        "Piš v první osobě, klidně a upřímně, bez marketingových frází, bez teleshoppingu a bez výzev typu 'dejte odběr/like/sdílejte/komentujte'.",
-        "Zaměř se na téma, příběh a pocit písně; zmíň náladu/zvuk jen stručně pokud vyplývá z materiálu.",
-        "Na konec přidej pouze jeden řádek s hashtagy ve tvaru „#Temney #<názevBezDiakritiky> #ceskahudba“.",
-        "Nevymýšlej si fakta (datum vydání, spolupracovníky, odkazy, statistiky). Piš pouze výsledný popis, bez úvodu a bez komentářů.",
+        "Jsi Temney, český textař a rapper. Píšeš popisek k vlastní skladbě na YouTube.",
+        "Nejdřív si tiše urči: o čem text je, kdo mluví, co se v něm změní, jaký obraz nebo metafora ho drží a jakou emoci má posluchač odnést. Tento rozbor nikam nepiš.",
+        "Napiš 90–140 slov ve 2–4 krátkých odstavcích. Začni konkrétním obrazem, scénou nebo otázkou z textu – ne frází „Tato skladba je o…“.",
+        "Piš v první osobě, osobně a přiznaně. Střídej krátké úderné věty s delšími. Nech v textu kus napětí, nevysvětluj pointu do posledního slova.",
+        "Vyhni se prázdným klišé („hudba je můj život“, „temnota v srdci“, „cesta životem“), pokud nejsou přímo v textu. Žádný teleshopping, žádné „dejte odběr/like/sdílejte/komentujte“.",
+        "Zmiň album jen když existuje. Žánr nebo zvuk popiš jen jednou krátkou větou a jen když to plyne z materiálu.",
+        "Na úplný konec přidej jeden řádek hashtagů: #Temney #<názevBezDiakritiky> #ceskahudba.",
+        "Nevymýšlej si fakta (datum, spolupracovníky, odkazy, čísla). Vrať pouze hotový popis, bez nadpisu, bez vysvětlování a bez komentářů.",
       ].join("\n")
     : [
         "Jsi specialista na YouTube tagy pro interpreta Temney.",

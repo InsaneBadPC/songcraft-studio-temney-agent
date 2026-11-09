@@ -1,9 +1,16 @@
 # SongCraft Studio — produkční TODO: AI hudební manažer a Oracle video pipeline
 
-**Stav dokumentu:** živý roadmap  
-**Cílová větev:** `dev/ai-manager-studio`  
-**Zdrojový snapshot:** 25. 9. 2026  
-**Rotace tokenů/API klíčů:** podle zadání provést až po dokončení a ověření ostatních bodů. Během vývoje nepřidávat nové secrets do repozitáře.
+> **HISTORICKÝ SNAPSHOT (25. 9. 2026).** Tento dokument už není živý roadmap.
+> Vznikl v době větve `dev/ai-manager-studio` a dvou repozitářů. Dnes platí jediné
+> repo `InsaneBadPC/songcraft-studio-temney-agent`, kopie `~/temney-agent` a větev
+> `main`. Aktuální stav a zbývající práci hledej v `AGENTS.md`, v git historii
+> a v kódu. `docs/VERIFICATION_STATUS.md` je starší ověřovací snapshot.
+> Checkboxy níže ber jen jako historický záznam.
+
+- **Stav dokumentu:** historický snapshot
+- **Cílová větev:** `main` (historicky `dev/ai-manager-studio`)
+- **Zdrojový snapshot:** 25. 9. 2026
+- **Rotace tokenů/API klíčů:** podle zadání provést až po dokončení a ověření ostatních bodů. Během vývoje nepřidávat nové secrets do repozitáře.
 
 ## První implementační slice — stav k 25. 9. 2026
 
@@ -41,11 +48,14 @@ Detailní checklisty níže zůstávají v původním znění; tento oddíl je s
 | 11. Testy a CI | hotovo | 66 passed / 1 skipped, 16/16 `deno check`, hermetic CI, scanner, smoke check |
 | 12. Nasazení | blokováno | chybí platný Supabase management access token pro `hfykngbhcxmnpxvjagoj` |
 
-Aktuální stav živých ověření a blockerů: `docs/VERIFICATION_STATUS.md`.
+Historický stav živých ověření: `docs/VERIFICATION_STATUS.md` (25. 9. 2026).
 Postup bez hesla do Postgres (Management API): `docs/DEPLOYMENT_RUNBOOK.md`, `scripts/apply-migrations.mjs`,
 `scripts/deploy-production.sh`.
 
-> Tento soubor je jediný kanonický seznam zbývající práce. Starší `todo.md`, `todo-dee7naux.md`, `VALIDATION.md` a `PROJECT_TODO_AI_MANAGER.md` jsou historické podklady, nikoli authoritative stav.
+> Tento soubor je **historický** seznam práce, ne authoritative stav. Aktuální
+> informace jsou v `AGENTS.md`, v git historii a v kódu. `todo.md`,
+> `todo-dee7naux.md`, `VALIDATION.md` a `PROJECT_TODO_AI_MANAGER.md` jsou také
+> historické podklady.
 
 ---
 
@@ -78,7 +88,7 @@ Veřejný stav nesmí být dosažen jen tím, že kód existuje v repository. Ka
 - [x] Synchronizovat pracovní snapshot s `dev/ai-manager-studio` (`2.9.1`).
 - [ ] Rozhodnout, zda se AI manager mergeuje do `main`, nebo zůstane na dlouhodobé větvi.
 - [ ] Změnit package/build verzi z jediného zdroje (`package.json`).
-- [ ] Zkontrolovat, že `origin/main` a `origin/dev/ai-manager-studio` mají před nasazením stejný zamýšlený commit.
+- [ ] Zkontrolovat, že `origin/main` odpovídá zamýšlenému commitu před nasazením.
 - [ ] Přidat kořenové `README.md` s přesnou architekturou a runbookem.
 - [ ] Odstranit nebo přesunout legacy Manus runbook a `template.json` mimo aktivní repo.
 
@@ -429,7 +439,7 @@ Cíl: méně „dashboardového chaosu“, více rychlého hudebního workspace.
 
 ### Před nasazením
 
-- [ ] Zvolený commit je na `dev/ai-manager-studio` i `main` podle rozhodnutí.
+- [ ] Zvolený commit je na `main` (historicky se kontrolovala i `dev/ai-manager-studio`).
 - [ ] Všechny migrace jsou v repository a v Supabase migration ledgeru.
 - [ ] Všechny Edge Functions jsou nasazeny z `supabase/functions/`.
 - [ ] Service keys jsou v Supabase/GitHub secrets.

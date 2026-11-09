@@ -4,7 +4,7 @@ Tento runbook neobsahuje žádné hesla, tokeny ani API klíče. Secrets se nast
 
 ## 1. Před nasazením
 
-- Potvrdit commit a větev `dev/ai-manager-studio`.
+- Potvrdit commit a větev `main` v jediném repu `songcraft-studio-temney-agent`.
 - Zkontrolovat `pnpm-lock.yaml`, změny schématu a všechny `supabase/migrations/*`.
 - Ověřit, že `songcraft` a video bucket jsou private.
 - Ověřit, že veřejné release assety neobsahují uživatelská videa.

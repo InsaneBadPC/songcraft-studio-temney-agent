@@ -1,5 +1,8 @@
 # Temney Agent — implementovaná fáze 1
 
+> **HISTORICKÝ SNAPSHOT.** Fáze 1 je dávno překonaná; další fáze už jsou
+> implementované. Aktuální stav je v `AGENTS.md`, v git historii a v kódu.
+
 Tato větev zachovává původní SongCraft Studio beze změny a přidává bezpečný základ pro agenta Temney.
 
 ## Co je hotové

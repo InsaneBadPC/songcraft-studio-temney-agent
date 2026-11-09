@@ -1,7 +1,14 @@
 # SongCraft Studio — Posvátný pracovní plán AI manažera
 
-**Větev:** `dev/ai-manager-studio` (vše se vyvíjí zde)
-**Zásada:** Dokud nebude hotový, není hotový ani SongCraft Studio.
+> **HISTORICKÝ PLÁN (23. 9. 2026).** Není to aktuální stav ani závazný roadmap.
+> Vznikl v době dvou repozitářů a větve `dev/ai-manager-studio`. Dnes platí:
+> jediné repo `InsaneBadPC/songcraft-studio-temney-agent`, pracovní kopie
+> `~/temney-agent`, jediná větev `main`. Checkboxy a odkazy na staré repo
+> nebrat jako pravdu; aktuální stav je v `AGENTS.md`, v git historii a v kódu.
+> `docs/VERIFICATION_STATUS.md` je starší ověřovací snapshot.
+>
+> **Větev:** `dev/ai-manager-studio` (historická)
+> **Zásada:** Dokud nebude hotový, není hotový ani SongCraft Studio.
 
 ---
 
@@ -24,8 +31,8 @@ Bonus zásada: agent je „hudební manažer“ – nevytváří jen artefakty, 
 
 ## 2. Aktuální stav (audit, 2026-09-23)
 
-### SongCraft Studio (hlavní repo, `InsaneBadPC/songcraft-studio`)
-- Expo 54 / React Native + Supabase. Větev `main` v2.9.1.
+### SongCraft Studio (historicky `InsaneBadPC/songcraft-studio`, dnes `songcraft-studio-temney-agent`)
+- Expo 54 / React Native + Supabase. Historický snapshot větve `main` byl v2.9.1.
 - Supabase tabulky (Postgres, RLS, snake_case): `sc_albums`, `sc_lyrics`, `sc_songs`, `sc_audio_versions`, `sc_rhyme_words`, `sc_video_jobs`, `sc_style_prompts`.
 - Edge funkce: `songcraft-studio-assistant` (read-only), `songcraft-cover-ai`, `songcraft-imports`, `songcraft-rhymes`, `songcraft-utilities`, `songcraft-youtube` (spouští GitHub Actions render-youtube → `sc_video_jobs`).
 - Klient: `lib/assistant-chat.ts` → `askStudioAssistant()` → `songcraft-studio-assistant`; UI `app/(tabs)/assistant.tsx` (5 konverzací v AsyncStorage, lokálně, bez DB).
@@ -193,7 +200,7 @@ Sekce `MUSIC_MANAGER_GUIDE` v `SYSTEM_PROMPT` orchest rátoru (česky, v souladu
 ## 7. Fáze realizace (podrobný rozbor)
 
 ### Fáze 0 — Příprava a integrace základů
-- [ ] V hlavním repu na větvi `dev/ai-manager-studio`.
+- [ ] V jediném repu na větvi `main` (historicky `dev/ai-manager-studio`).
 - [ ] Převézt `supabase/migrations/20260922000000_temney_agent_v3.sql` do hlavního repa (nebo vytvořit novou migraci) + rozšířit o nové sloupce (5.0).
 - [ ] Nakopírovat prototyp: `agent-orchestrator`, `video-renderer-dispatch`, `youtube-publish`, `youtube-sync-stats`, worker ffmpeg, `lib/temney-agent.ts`, workflow `sync-youtube-stats`.
 - [ ] Secrets: `GEMINI_API_KEY`, `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `YOUTUBE_CLIENT_ID`, `YOUTUBE_CLIENT_SECRET`, `VIDEO_VM_ENDPOINT`, `VIDEO_VM_BASIC_AUTH`, `R2_*` (server-side jen).

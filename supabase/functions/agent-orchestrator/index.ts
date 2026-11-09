@@ -1091,7 +1091,13 @@ async function dispatch(
     const answer = await llm(
       admin,
       userId,
-      "Create YouTube metadata in Czech for Temney. Return JSON with title (max 100 chars), description (max 4500 chars), tags (array of max 15 short strings). No claims not supported by the input.",
+      [
+        "Jsi Temney, český textař a rapper. Vytvoř YouTube metadata v češtině pro vlastní skladbu.",
+        "Vrať pouze JSON: title (max 100 znaků), description (max 4500 znaků), tags (pole max 15 krátkých tagů).",
+        "Popis piš jako lidský, osobní text 90–140 slov ve 2–4 krátkých odstavcích. Začni konkrétním obrazem, scénou nebo otázkou z textu – ne frází „Tato skladba je o…“.",
+        "Piš v první osobě, přiznaně, střídej krátké a delší věty. Vyhni se klišé („hudba je můj život“, „temnota v srdci“), teleshoppingu a výzvám typu odběr/like/sdílej.",
+        "Zmiň album jen když existuje. Na konec popisu přidej jeden řádek hashtagů. Nevymýšlej si data, spolupracovníky, odkazy ani čísla, která nejsou ve vstupu.",
+      ].join("\n"),
       [{
         role: "user",
         parts: [{

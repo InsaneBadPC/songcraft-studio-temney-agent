@@ -1,10 +1,10 @@
 # SongCraft Studio — Project TODO: AI Manažer
 
-> **Kanónický produkční roadmap:** `docs/TODO_PRODUCTION_AI_AGENT.md`  
-> Tento historický plán ponechávám pro traceability; aktuální stav a gate patří do kanónického souboru.
+> Tento i `docs/TODO_PRODUCTION_AI_AGENT.md` jsou **historické** plány. Aktuální
+> stav je v `AGENTS.md`, v git historii a v kódu. Ponecháno pro traceability.
 
-**Větev:** `dev/ai-manager-studio`
-**Návaznost:** velký plán v `docs/SACRED_WORK_PLAN.md` (jednotlivé fáze a detaily).
+**Větev:** `dev/ai-manager-studio` (historická; dnes `main`)
+**Návaznost:** velký plán v `docs/SACRED_WORK_PLAN.md` (historické fáze a detaily).
 
 Legenda: `[ ]`=todo, `[~]`=v běhu, `[x]`=done.
 
@@ -12,7 +12,7 @@ Legenda: `[ ]`=todo, `[~]`=v běhu, `[x]`=done.
 
 ## Fáze 0 — Integrace základů (větev, schéma, prototyp)
 
-- [ ] V hlavním repu na větvi `dev/ai-manager-studio` (hotovo — vetev existuje).
+- [ ] V jediném repu na větvi `main` (historicky `dev/ai-manager-studio`).
 - [ ] Převézt migraci `20260922000000_temney_agent_v3.sql` do `supabase/migrations/` hlavního repa.
 - [ ] Rozšířit `agent_videos`: sloupce `mode`, `backend`, `audio_storage_path`, `prompt_used`, `output_path`.
 - [ ] Rozšířit `agent_image_assets`: `for_album boolean`, `render_url text`, `variant_label text`.

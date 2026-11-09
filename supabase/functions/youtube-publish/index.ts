@@ -213,7 +213,14 @@ Deno.serve(async (request) => {
   };
   if (!["private", "unlisted", "public"].includes(currentSnapshot.privacyStatus)) return json({ error: "Soukromí publikace není platné." }, 400);
   if (!currentSnapshot.title) return json({ error: "Před publikací chybí název videa." }, 400);
-  if (JSON.stringify(currentSnapshot) !== JSON.stringify(expectedSnapshot)) {
+  // Agent-orchestrator ukládá potvrzovací snapshot přes `clip`, který slije
+  // všechny bílé znaky na jednu mezeru. Popis publikace přitom odstavce a
+  // hashtagy na nových řádcích legitimně má. Drift proto porovnáváme po
+  // stejné normalizaci, ale na YouTube posíláme původní popis.
+  const descriptionKey = (value: unknown) => clip(value, 5_000).replace(/\s+/g, " ").trim();
+  const currentCompare = { ...currentSnapshot, description: descriptionKey(publication.description) };
+  const expectedCompare = { ...expectedSnapshot, description: descriptionKey(payload.description) };
+  if (JSON.stringify(currentCompare) !== JSON.stringify(expectedCompare)) {
     await admin.from("agent_action_log").insert({ user_id: user.id, action_type: "publish_to_youtube", target_id: publication.id, payload: { reason: "metadata_drift" }, result: "error" });
     return json({ error: "Metadata publikace se od potvrzení změnila. Potvrzení prosím vytvoř znovu." }, 409);
   }

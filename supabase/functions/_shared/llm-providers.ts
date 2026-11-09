@@ -272,7 +272,11 @@ export async function completeText(
       body: JSON.stringify({
         systemInstruction: { parts: [{ text: system }] },
         contents: [{ role: "user", parts: [{ text: userText }] }],
-        generationConfig,
+        // Gemini 3.x defaultně utrácí většinu maxOutputTokens na „thinking“ a na
+        // samotný text zbude jen pár desítek tokenů. U krátkých textů (popis,
+        // tagy, rýmy, asistent) je to zbytečné a způsobovalo to useknuté věty.
+        // Když volající chce thinking, předá vlastní thinkingConfig.
+        generationConfig: { thinkingConfig: { thinkingBudget: 0 }, ...generationConfig },
       }),
       signal: AbortSignal.timeout(60_000),
     })
@@ -290,7 +294,12 @@ export async function completeText(
   if (!response.ok) return null;
   const payload = await response.json().catch(() => null);
   if (provider.kind === "gemini") {
-    const parts = payload?.candidates?.[0]?.content?.parts;
+    const candidate = payload?.candidates?.[0];
+    const finishReason = candidate?.finishReason;
+    // SAFETY / RECITATION / PROHIBITED_CONTENT vrací jen torzo. Radši null,
+    // aby volající ukázal chybu, než aby uživatel dostal useknutou větu.
+    if (finishReason && finishReason !== "STOP" && finishReason !== "MAX_TOKENS") return null;
+    const parts = candidate?.content?.parts;
     return Array.isArray(parts) ? parts.map((part: { text?: unknown }) => typeof part.text === "string" ? part.text : "").join("\n").trim() : null;
   }
   const content = payload?.choices?.[0]?.message?.content;

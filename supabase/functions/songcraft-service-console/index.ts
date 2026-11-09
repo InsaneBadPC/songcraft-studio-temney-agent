@@ -1,6 +1,7 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "jsr:@supabase/supabase-js@2";
 import { isAllowedPrivateUser, privateAccessMessage } from "../_shared/access.ts";
+import { parseR2Path, r2FromEnv } from "../_shared/r2.ts";
 
 const cors = {
   "Access-Control-Allow-Origin": "*",
@@ -298,8 +299,10 @@ Deno.serve(async (request) => {
     }
     const sourceBackupId = typeof input?.sourceBackupId === "string" ? input.sourceBackupId.trim() : "";
     const targetUserId = typeof input?.targetUserId === "string" ? input.targetUserId.trim() : "";
+    const sourceUserIdInput = typeof input?.sourceUserId === "string" ? input.sourceUserId.trim() : "";
     if (!UUID.test(sourceBackupId)) return await deny(action, 400, "sourceBackupId musí být UUID hotové zálohy.");
     if (mode === "restore_existing" && !UUID.test(targetUserId)) return await deny(action, 400, "restore_existing potřebuje UUID účtu, jehož data se nahradí.");
+    if (sourceUserIdInput && !UUID.test(sourceUserIdInput)) return await deny(action, 400, "sourceUserId musí být UUID účtu v záloze.");
 
     const { data: source } = await admin
       .from("sc_service_backups")
@@ -309,6 +312,16 @@ Deno.serve(async (request) => {
     if (!source) return await deny(action, 404, "Zdrojová záloha nenalezena.");
     if (source.kind !== "backup" || source.status !== "done" || !source.archive_path) {
       return await deny(action, 409, "Zdrojová záloha ještě není hotová.");
+    }
+
+    let sourceUserId = targetUserId;
+    if (mode === "restore_new") {
+      if (!UUID.test(sourceUserIdInput)) {
+        return await deny(action, 400, "restore_new potřebuje sourceUserId účtu, jehož data se mají obnovit.");
+      }
+      sourceUserId = sourceUserIdInput;
+    } else if (sourceUserIdInput) {
+      sourceUserId = sourceUserIdInput;
     }
 
     let destinationUserId = targetUserId;
@@ -321,7 +334,7 @@ Deno.serve(async (request) => {
       if (password.length < 8) return await deny(action, 400, "Heslo musí mít alespoň 8 znaků.");
       if (displayName.length < 1 || displayName.length > 80) return await deny(action, 400, "Jméno musí mít 1 až 80 znaků.");
 
-      if (!await audit({ actionType: "service:prepare_restore", result: "pending", payload: { mode, sourceBackupId, email } })) {
+      if (!await audit({ actionType: "service:prepare_restore", result: "pending", payload: { mode, sourceBackupId, email, sourceUserId } })) {
         return json({ error: "Zápis auditu selhal, obnova nebyla připravena." }, 500);
       }
       const created = await fetch(adminUsers, {
@@ -332,7 +345,7 @@ Deno.serve(async (request) => {
       });
       if (!created.ok) {
         const reason = String((await created.json().catch(() => null))?.msg ?? created.status);
-        await audit({ actionType: "service:prepare_restore", result: "error", payload: { mode, email }, error: reason });
+        await audit({ actionType: "service:prepare_restore", result: "error", payload: { mode, email, sourceUserId }, error: reason });
         return json({ error: `Nový účet se nepodařilo založit: ${reason.slice(0, 200)}` }, created.status === 422 ? 409 : 502);
       }
       const fresh = await created.json();
@@ -352,6 +365,7 @@ Deno.serve(async (request) => {
         source_backup_id: sourceBackupId,
         target_user_id: destinationUserId || null,
         id_map: idMap,
+        progress: { sourceUserId },
         requested_by: user.id,
         confirm_nonce_hash: await hashToken(nonce),
         confirm_expires_at: new Date(Date.now() + NONCE_TTL_MS).toISOString(),
@@ -359,10 +373,10 @@ Deno.serve(async (request) => {
       .select("id,kind,mode,status,target_user_id,confirm_expires_at")
       .single();
     if (error) {
-      await audit({ actionType: "service:prepare_restore", result: "error", payload: { mode, sourceBackupId }, error: error.message });
+      await audit({ actionType: "service:prepare_restore", result: "error", payload: { mode, sourceBackupId, sourceUserId }, error: error.message });
       return json({ error: "Obnovu se nepodařilo připravit." }, 502);
     }
-    await audit({ actionType: "service:prepare_restore", result: "success", payload: { jobId: data.id, mode, targetUserId: destinationUserId } });
+    await audit({ actionType: "service:prepare_restore", result: "success", payload: { jobId: data.id, mode, sourceUserId, targetUserId: destinationUserId } });
 
     return json({
       job: data,
@@ -420,7 +434,7 @@ Deno.serve(async (request) => {
   if (action === "job_status") {
     const jobId = typeof input?.jobId === "string" ? input.jobId.trim() : "";
     let query = admin.from("sc_service_backups")
-      .select("id,kind,mode,status,target_user_id,source_backup_id,archive_path,archive_bytes,manifest,progress,error_message,created_at,started_at,finished_at")
+      .select("id,kind,mode,status,target_user_id,source_backup_id,archive_path,archive_bytes,archive_parts,manifest,progress,error_message,created_at,started_at,finished_at")
       .order("created_at", { ascending: false })
       .limit(20);
     if (jobId) {
@@ -434,8 +448,18 @@ Deno.serve(async (request) => {
     for (const job of (jobs ?? []) as Record<string, unknown>[]) {
       const entry = { ...job };
       if (job.status === "done" && typeof job.archive_path === "string" && job.archive_path) {
-        const signed = await admin.storage.from(BACKUP_BUCKET).createSignedUrl(job.archive_path, 3600, { download: true });
-        entry.downloadUrl = signed.data?.signedUrl ?? null;
+        const r2Path = parseR2Path(job.archive_path);
+        if (r2Path) {
+          entry.archive_storage = "r2";
+          entry.downloadUrl = null;
+          if (Number(job.archive_parts) === 1) {
+            const r2 = r2FromEnv({ bucket: r2Path.bucket });
+            entry.downloadUrl = await r2.presign("GET", `${r2Path.key}.part-0001`, 3600);
+          }
+        } else {
+          const signed = await admin.storage.from(BACKUP_BUCKET).createSignedUrl(job.archive_path, 3600, { download: true });
+          entry.downloadUrl = signed.data?.signedUrl ?? null;
+        }
       }
       withUrls.push(entry);
     }

@@ -1,5 +1,8 @@
 # Ověření implementace — 25. 9. 2026 (večer, po nasazení)
 
+> **HISTORICKÝ SNAPSHOT.** Toto jsou výsledky k 25. 9. 2026, ne aktuální stav.
+> Aktuální informace jsou v `AGENTS.md`, v git historii a v živém projektu.
+
 Tento záznam obsahuje výsledky hermetic kontrol, živých E2E testů a stav rollbacku. Neobsahuje credentials ani hodnoty secretů.
 
 ## Nasazení na produkci (projekt `hfykngbhcxmnpxvjagoj`)

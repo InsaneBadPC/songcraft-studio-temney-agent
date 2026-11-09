@@ -1,5 +1,9 @@
 # SongCraft Studio 3.0 — Temney Agent
 
+> **HISTORICKÝ IMPLEMENTAČNÍ SNAPSHOT (22. 9. 2026).** Nasazovací příkazy a
+> seznam secrets níže nemusí odpovídat aktuálnímu stavu. Aktuální postup je
+> v `AGENTS.md`, `docs/DEPLOYMENT_RUNBOOK.md` a v kódu.
+
 ## Stav implementace
 
 Verze 3.0 přidává serverový orchestrátor s function callingem, bezpečnou databázovou migraci, privátní artwork pipeline, renderovací frontu, publikační drafty a synchronizaci statistik. Chat v aplikaci volá `agent-orchestrator` a při jeho nedostupnosti zachovává fallback na původního asistenta.

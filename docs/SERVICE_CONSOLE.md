@@ -42,7 +42,8 @@ Vzor: `supabase/functions/youtube-status/index.ts` (ověření) +
 | neznámá akce | 400 (allowlist, ne blacklist) |
 | každá úspěšná i odmítnutá operace | zápis do `agent_action_log` |
 
-Akce: `list_users`, `create_user`, `start_backup`, `start_restore`,
+Akce: `list_users`, `list_service_accounts`, `create_user`, `grant_service`,
+`revoke_service`, `start_backup`, `prepare_restore`, `confirm_restore`,
 `job_status`, `cancel_job`.
 
 `verify_jwt = true` v `supabase/config.toml`.
@@ -53,6 +54,20 @@ Nová Node služba (`/opt/songcraft-studio/workers/backup/`, systemd
 `songcraft-backup`), **neprivilegovaný** uživatel `songcraft-renderer`, čte
 `sc_service_backups` / `sc_service_restores`, streamuje, průběh průběžně
 zapisuje do DB. Režim `RUN_ONCE=1` pro ruční běh a testy.
+
+Archiv může ležet v Supabase Storage nebo v Cloudflare R2. Přepínač je
+`BACKUP_STORAGE=r2` v `/etc/songcraft-studio/backup.env`; pro R2 je potřeba
+`R2_ENDPOINT`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_BUCKET`
+(výchozí `songcraft-studio`) a `R2_BACKUP_PREFIX` (výchozí `backups`).
+Hotová záloha má pak `archive_path = r2://songcraft-studio/backups/<jobId>`,
+takže obnova pozná, odkud části stáhnout. Staré zálohy s `archive_path = <jobId>`
+zůstávají čitelné ze Supabase.
+
+U `restore_new` se posílá `sourceUserId` — UUID účtu, jehož data jsou v záloze.
+Service console ho uloží do `progress.sourceUserId` a worker podle něj vybere
+správnou část archivu. Bez něj se použije `target_user_id` (chování
+`restore_existing`). `sourceUserId` musí být UUID; zda v archivu opravdu je,
+ověří worker při obnově a vypíše dostupné účty.
 
 ### C. UI `app/service.tsx`
 

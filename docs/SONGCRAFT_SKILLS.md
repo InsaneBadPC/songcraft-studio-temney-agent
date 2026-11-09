@@ -1,5 +1,18 @@
 # SongCraft Studio — skills pro práci s projektem
 
+> **ARCHIVOVANÝ SNAPSHOT (28. 9. 2026).** Tento dokument vznikl v době, kdy projekt
+> používal dvě repozitářové kopie a větev `dev/ai-manager-studio`. **Dnes to neplatí.**
+> Aktuální kanonická fakta:
+>
+> - jediné repo: `InsaneBadPC/songcraft-studio-temney-agent`
+> - jediná pracovní kopie: `~/temney-agent`
+> - jediná větev: `main`
+> - aktuální verze: viz `package.json` (v době archivace 3.0.19; releases jsou novější)
+> - aktuální stav: `AGENTS.md`, git historie a živý Supabase; `docs/VERIFICATION_STATUS.md` je starší ověřovací snapshot
+>
+> Historické příkazy, cesty a počty níže nebrat jako aktuální pravdu. Slouží jen
+> pro traceability. Před použitím je ověř proti kódu a živému projektu.
+
 Vzniklo z reálného průzkumu repozitáře a **běžícího ověření** na Termuxu. Každý skill obsahuje
 pouze to, co bylo skutečně ověřeno spuštěním, nebo přes `deno check` / CI log / dotaz do DB.
 Když něco nešlo ověřit, je to v textu označené jako **NE OVĚŘENO**.
@@ -10,18 +23,18 @@ Když něco nešlo ověřit, je to v textu označené jako **NE OVĚŘENO**.
 
 | Položka | Hodnota |
 |---|---|
-| Pracovní kopie | `/data/data/com.termux/files/home/work/songcraft-studio` |
+| Pracovní kopie | `/data/data/com.termux/files/home/temney-agent` |
 | Git branch (aktuální) | `main` |
-| Verze, po které poznat správné repo | **`3.x`** – když vypišeš `2.9.1`, jsi ve špatné kopii |
-| Druhá kopie na sdcard | `/storage/emulated/0/InsaneCode/songcraft-studio` (2.9.1, mrtvá) — viz 11g |
+| Verze, po které poznat správné repo | aktuální `package.json`; historické kopie měly `2.9.1` nebo `3.0.8` |
+| Staré kopie (needitují se) | `~/work/songcraft-studio` (3.0.8), `/storage/emulated/0/InsaneCode/songcraft-studio` (2.9.1) |
 | `node_modules` | bind mount z vnitřního úložiště, viz 11g |
 | Zálohy | `/storage/emulated/0/InsaneCode/songcraft-backup-20260925.zip`, `songcraft-secrets-encrypted-20260925.zip` (+ `.sha256`) |
 | Secrety (mimo repo) | `~/InsaneCode/secrets/edge-functions.env` (16 klíčů), `songcraft-release.jks`, `songcraft-release.pass` |
 | Další secrety | `/storage/emulated/0/InsaneCode/Secret/` (Oracle, YouTube client_secret, `PRISTUPOVE-ÚDAJE.md`) |
 | Supabase projekt | `hfykngbhcxmnpxvjagoj` |
-| GitHub | `InsaneBadPC/songcraft-studio` (public) |
+| GitHub | `InsaneBadPC/songcraft-studio-temney-agent` |
 | Stack | Expo SDK 54, RN 0.81.5, React 19.1, expo-router 6, TS strict, NativeWind 4, TanStack Query 5, Supabase, Vitest 2 |
-| Verze v `package.json` | `2.9.1` (APK release má `2.9.4` – verzi propíše workflow před prebuildem) |
+| Verze v `package.json` | `3.0.19` v době archivace; releases jsou novější (`app-v3.0.25` k 18. 10. 2026) |
 | Nástroje v Termuxu | `ffmpeg 8.1.3`, `deno`, `supabase`, `gh 2.101.0` (bez auth), `node 22`, `python 3.14` |
 | Staré sessions opencode | `~/.local/share/opencode/opencode.db` → tabulky `session_v2`, `session_message` (2431 zpráv) |
 
@@ -44,20 +57,20 @@ Alba: `Myšlenkovej Boom` = `c3398ce7-c442-4e59-8621-67f25ead6d80`,
 **Kdy použít:** poprvé v repu, nebo když nevíš kam sáhnout.
 
 ```bash
-cd /data/data/com.termux/files/home/work/songcraft-studio
+cd /data/data/com.termux/files/home/temney-agent
 git log --oneline -10
 find app lib components supabase/functions supabase/migrations -type f -not -path '*/node_modules/*' | sort
 ```
 
 Kde co žije:
 
-- `app/` – expo-router routy. `app/(tabs)/` = 6 tabů (Přehled, Texty, Knihovna, Asistent, Nastavení + skryté Alba), `app/song/[id].tsx` = detail skladby + verze MP3, `app/export/youtube.tsx` = export MP4, `app/auth.tsx` = soukromé přihlášení.
+- `app/` – expo-router routy. `app/(tabs)/` = 7 tabů (Přehled, Texty, Knihovna, Videa, Alba, Asistent, Nastavení), `app/song/[id].tsx` = detail skladby + verze MP3, `app/export/youtube.tsx` = export MP4, `app/auth.tsx` = soukromé přihlášení.
 - `lib/external-studio.ts` – **jediná skutečná datová vrstva**. Každý read/write má `.eq("user_id", user.id)`.
 - `lib/agent-api.ts` – jediná hranice klient → AI agent.
-- `supabase/functions/` – 14 aktivních Edge Function + `_shared/`.
-- `supabase/migrations/` – 13 migrací, zdroj pravdy pro DB.
+- `supabase/functions/` – 20 adresářů funkcí + `_shared/` (historický snapshot uváděl 14).
+- `supabase/migrations/` – 27 migrací, zdroj pravdy pro DB (historický snapshot uváděl 13).
 - `workers/video-renderer/worker.mjs` – ffmpeg worker na Oracle VM.
-- `docs/` – plány a stav. `docs/VERIFICATION_STATUS.md` = poslední ověřený stav nasazení.
+- `docs/` – plány a stav. `docs/VERIFICATION_STATUS.md` = starší ověřovací snapshot (25. 9. 2026), ne aktuální stav.
 - `supabase_songcraft_*.json` v rootu – **legacy snapshoty, ne zdroj pravdy**. Pro nové změny je zdrojem pravdy `supabase/functions/` + `supabase/migrations/`.
 
 **Dead code, nehledat ho:** `server/**` a `lib/_core/**` jsou pozůstatky Manus backendu
@@ -71,7 +84,7 @@ Také `lib/temney-agent.ts` a `songcraft-studio-assistant` funkce jsou nepouží
 Ověřeno na Termuxu 28. 9. 2026, všechny **PASS** na `398871cf`:
 
 ```bash
-cd /data/data/com.termux/files/home/work/songcraft-studio
+cd /data/data/com.termux/files/home/temney-agent
 export PATH="/data/data/com.termux/files/usr/bin:$PATH"
 
 node scripts/security-boundary-check.mjs     # 1 s   → "security-boundary-check: OK"
@@ -98,7 +111,7 @@ Pravidla:
 Ověřit stav CI na commitu:
 
 ```bash
-curl -s "https://api.github.com/repos/InsaneBadPC/songcraft-studio/actions/runs?per_page=10" \
+curl -s "https://api.github.com/repos/InsaneBadPC/songcraft-studio-temney-agent/actions/runs?per_page=10" \
 | python3 -c "import json,sys;[print(f\"{r['name'][:30]:30} {r['conclusion']:8} {r['head_sha'][:8]} {r['created_at']}\") for r in json.load(sys.stdin)['workflow_runs']]"
 ```
 
@@ -331,7 +344,7 @@ Starý `songcraft-video-renderer` (GitHub release pipeline) je **zastavený a fa
 ### Jak auto-update reálně funguje
 
 `lib/app-update.ts` **nečte `main`**. Poluje na
-`https://api.github.com/repos/InsaneBadPC/songcraft-studio/releases`,
+`https://api.github.com/repos/InsaneBadPC/songcraft-studio-temney-agent/releases`,
 přijímá jen tagy `^app-v\d+\.\d+\.\d+$` a bere první `.apk`.
 => **Aby aplikace dostupávala aktualizace, stačí mít na repu release.**
 `main` je zdroj pravdy pro CI, ne pro updater.
@@ -346,42 +359,24 @@ Další fakta:
   buildType z debug klíče runnera na `CI_KEYSTORE` (jinak se debug klíč mezi buildu mění
   a update nejsou proveditelné). Klíč jen v GitHub Secrets.
 
-### Stav repozitáře k 28. 9. 2026 (ověřeno přes API)
+### Stav repozitáře (historická poznámka)
 
-| Větev | SHA | Poznámka |
-|---|---|---|
-| `dev/ai-manager-studio` | `398871cf` | **HEAD, nejnovější kód** |
-| `main` | `8ca9787f` | **29 commitů pozadu** (`status: ahead`, `behind: 0`) |
-| `experiment/cover-image-mp3-fix` | `8e1b51a3` | experiment |
-| `experiment/google-ai-studio` | `e8ac4a2f` | experiment |
+Tabulka větví `dev/ai-manager-studio` vs. `main` a návod na force-push jsou
+**zastaralé**. Projekt dnes používá jediné repo a jedinou větev `main`.
+Historické větve ani staré SHA nepoužívej jako zdroj pravdy.
 
-Release `app-v2.9.4` byl sestaven **z `398871cf`** (tělo release: „Automatické sestavení
-po změně `398871cf`“, 2.9.4, versionCode 20904, sha256 `13533f0b…`), ale jeho
-`target_commitish` ukazuje na `main`. **Ano – release je z nejnovějšího kódu.**
-
-Nedalo se to udělat, protože **na tomhle zařízení není přihlazený GitHub** –
-`gh auth status` hlásí „not logged in“, `GH_TOKEN` chybí. Bez tokenu nelze pushnout.
-
-Co by se muselo udělat po doplnění auth (a po mém potvrzení – je to nevratné):
+Aktuální stav vždy ověř:
 
 ```bash
-git fetch origin
-git push origin dev/ai-manager-studio:main --force-with-lease   # NE force, viz níže
+cd ~/temney-agent
+git remote -v
+git status --short
+git log --oneline -5
+grep '"version"' package.json
 ```
 
-Doporučení, ne postup: **nepoužívej force.** Bezpečnější je fast-forward nebo merge:
-
-```bash
-git checkout main && git pull --ff-only
-git merge --no-ff origin/dev/ai-manager-studio -m "sync: dev/ai-manager-studio -> main"
-git push origin main
-```
-
-A pozor na `main` jako zdroj pravdy pro `build-apk.yml`: release tagy míří na `main`,
-takže po přesunu `main` dopředu začnou tagy ukazovat na novější kód – to je žádoucí
-chování, ale zároveň to znamená, že **každý push na `main` spustí nový APK release**.
-A nedělej to dřív, než je zelené CI na `398871cf` (viz B1), jinak se rozbije build
-i pro uživatele, kteří si 2.9.4 nainstalovali.
+Push na `main` může spustit build APK; před jakýmkoliv push/release si vyžádej
+výslovné schválení uživatele.
 
 ---
 
@@ -520,25 +515,24 @@ POST {SUPABASE_URL}/storage/v1/object/songcraft/{uid}/covers/test.jpg   (JWT v A
 
 ---
 
-## 11b. SKILL: Dvě repa, updater a podepisování APK
+## 11b. SKILL: Repo, updater a podepisování APK
 
-Repů jsou **dva** a nesmí se zaměnit:
+**Dnes existuje jen jedno repo:**
 
-| Repo | Verze | K čemu |
-|---|---|---|
-| `InsaneBadPC/songcraft-studio` | 3.x.x (main) | zdroj pravdy, CI, nasazování funkcí a migrací |
-| `InsaneBadPC/songcraft-studio-temney-agent` | 3.0.x | **odtud updater v aplikaci tahá release** |
+| Repo | K čemu |
+|---|---|
+| `InsaneBadPC/songcraft-studio-temney-agent` | zdroj pravdy, CI, updater i releases |
 
-`lib/app-update.ts` má `const REPO = "..."` zadrátovaný. Aplikace si pak hledá
-`app-v*` na tomhle repu. Pushnutí do `songcraft-studio` tedy samotný nestačí,
-úživatel aktualizaci neuvidí.
+Historicky se používalo i `InsaneBadPC/songcraft-studio`, ale **to už není
+kanonické repo**. `lib/app-update.ts` má zadrátované
+`REPO = "InsaneBadPC/songcraft-studio-temney-agent"`; aplikace hledá release
+`app-v*` tam. Žádné kopírování mezi repy se už nedělá.
 
-**Postup pro opravu, kterou má dostat i uživatel:**
-1. změna v `songcraft-studio` (main), commit i push
+**Postup pro změnu, kterou má dostat i uživatel:**
+1. změna v `~/temney-agent` na `main`, commit a push (jen s výslovným schválením)
 2. zkontrolovat CI a `Deploy agent orchestrator`
-3. zkopírovat soubory do `songcraft-studio-temney-agent`, vrátit tam
-   `REPO` na temney-agent a verzi zvednout o 1 (3.0.6 → 3.0.7)
-4. pushnout a `gh workflow run build-apk.yml -f force_version=X.Y.Z`
+3. zvednout verzi ve `package.json` podle potřeby
+4. spustit `build-apk.yml` (workflow si verzi případně upraví sám)
 
 ### Podepisování
 - `build-apk.yml` **musí** volat `scripts/configure-android-signing.mjs` a
@@ -639,7 +633,7 @@ Proto:
 
 ---
 
-## 11g. SKILL: `node_modules` na SD kartě (Termux) + dvě kopie repa
+## 11g. SKILL: `node_modules` na SD kartě (Termux) + historické kopie
 
 ### Proč bind mount
 
@@ -654,7 +648,7 @@ EACCES: permission denied, symlink '../semver/bin/semver.js' -> '.../node_module
 namapuje. `.npmrc` už obsahuje `node-linker=hoisted`, to samo nestačí.
 
 ```bash
-REPO=/mnt/sdcard/InsaneCode/songcraft-studio   # nebo ~/work/songcraft-studio
+REPO=/data/data/com.termux/files/home/temney-agent
 mkdir -p "$REPO/node_modules" /data/data/com.termux/files/home/snm
 mount --bind /data/data/com.termux/files/home/snm "$REPO/node_modules"
 cd "$REPO" && pnpm install --frozen-lockfile
@@ -682,28 +676,23 @@ spočítat SHA-1 → `Failed to get the SHA-1 for .../web.css`. V `metro.config.
 je to už ošetřené (`forceWriteFileSystem: !isCI`), takže řešení je prostě
 proměnnou prostředí. GitHub Actions ji nastavuje sám.
 
-### POZOR: dvě kopie repa s různou historií
+### POZOR: historické kopie repa
 
 | Kopie | Stav |
 |---|---|
-| `~/work/songcraft-studio` | **pracovní kopie** – má opravu importu, právní stránky, vrácený tab Alba |
-| `/mnt/sdcard/InsaneCode/songcraft-studio` | jiná linie historie, ne potomek té první |
+| `~/temney-agent` | **jediná kanonická pracovní kopie** |
+| `~/work/songcraft-studio` | historická kopie (3.0.8), needitovat |
+| `/storage/emulated/0/InsaneCode/songcraft-studio` | historická kopie (2.9.1), needitovat |
 
-Obě míří na stejný GitHub remote, ale **nemají společného předka** – `git log`
-jedné nezná commity druhé a `git apply -3` nemá co porovnat. Kopie na SD kartě
-dlouho držela jen necommitnuté změny a působila jako ta správná.
-
-**Než začneš psát kód, ověř, kde ses:**
+Staré kopie mohou mít jinou historii a necommitnuté změny. **Nepoužívej je jako
+zdroj pravdy ani do nich nepiš.** Před prací ověř, že jsi v `~/temney-agent`:
 
 ```bash
-git -C ~/work/songcraft-studio log --oneline -3
-git -C /mnt/sdcard/InsaneCode/songcraft-studio log --oneline -3
-git -C <jedna> status --short | wc -l
+cd ~/temney-agent
+git remote -v
+git log --oneline -3
+git status --short
 ```
-
-Práce na SD kartě pak musí do pracovní kopie přejít ručně po souborach. A tady
-platí **11f**: při tomhle přenosu hledat `href: null` a další záměrně vrácené
-věci, protože kopie na SD kartě schovaný tab Alba pořád má.
 
 ---
 
@@ -731,7 +720,7 @@ Otevřené body, které z nich vyplynuly a které v `todo-dee7naux.md` ještě n
 ## 13. Ověřovací checklist pro „hotovo“
 
 ```bash
-cd /data/data/com.termux/files/home/work/songcraft-studio
+cd /data/data/com.termux/files/home/temney-agent
 node scripts/security-boundary-check.mjs          # OK
 node scripts/production-smoke-check.mjs          # OK
 npx tsc --noEmit                                 # 0 chyb

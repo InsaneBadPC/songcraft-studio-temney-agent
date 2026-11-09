@@ -112,7 +112,7 @@ async function runDeployWorker({ repoDir, service = "songcraft-renderer.service"
   };
 }
 
-async function runReadFile({ path: filePath, repo = "InsaneBadPC/songcraft-studio", ref = "main" }) {
+async function runReadFile({ path: filePath, repo = "InsaneBadPC/songcraft-studio-temney-agent", ref = "main" }) {
   const token = process.env.GITHUB_TOKEN;
   if (!token) return { output: "chybí GITHUB_TOKEN na VM", exitCode: 1 };
   const clean = String(filePath || "").replace(/^\/+/, "");

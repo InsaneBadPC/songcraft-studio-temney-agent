@@ -32,6 +32,7 @@ const migrations = [
   "20260928120000_agent_video_loop_mode.sql",
   "20260929000000_agent_video_source_loop.sql",
   "20261019000000_album_youtube_playlist.sql",
+  "20261108000000_r2_storage_paths.sql",
 ];
 
 for (const relative of [...required, ...migrations.map((name) => `supabase/migrations/${name}`)]) {

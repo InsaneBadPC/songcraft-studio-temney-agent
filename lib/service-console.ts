@@ -33,6 +33,7 @@ export type ServiceJob = {
   source_backup_id: string | null;
   archive_path: string | null;
   archive_bytes: number | null;
+  archive_storage?: "r2" | "supabase" | null;
   manifest: Record<string, unknown>;
   progress: Record<string, unknown>;
   error_message: string | null;
@@ -66,6 +67,7 @@ export function startServiceBackup() {
 
 export function prepareServiceRestore(input: {
   sourceBackupId: string;
+  sourceUserId?: string;
   targetUserId?: string;
   mode: "restore_existing" | "restore_new";
   email?: string;

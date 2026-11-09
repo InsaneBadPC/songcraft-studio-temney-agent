@@ -20,6 +20,11 @@ ProtectHome=true
 # Stejný systémový účet jako renderer, ale jiný env soubor: renderer nesmí
 # dostat service_role jen proto, že běží vedle. Backup ho potřebuje, protože
 # čte data všech uživatelů a nahrává archiv do songcraft-backups.
+# Pro R2 přidej do /etc/songcraft-studio/backup.env:
+#   BACKUP_STORAGE=r2
+#   R2_ENDPOINT=https://<account>.r2.cloudflarestorage.com
+#   R2_ACCESS_KEY_ID=... R2_SECRET_ACCESS_KEY=...
+#   R2_BUCKET=songcraft-studio R2_BACKUP_PREFIX=backups
 ReadWritePaths=/var/lib/songcraft-studio /tmp
 
 [Install]

@@ -1,5 +1,11 @@
 # Project TODO
 
+> **HISTORICKÝ SEZNAM.** Pochází z doby, kdy se pracovalo s repem
+> `InsaneBadPC/songcraft-studio`. Dnes je kanonické pouze
+> `InsaneBadPC/songcraft-studio-temney-agent` (`~/temney-agent`, větev `main`).
+> Aktuální stav viz `AGENTS.md`, git historie a kód. `docs/VERIFICATION_STATUS.md`
+> je starší ověřovací snapshot.
+
 - [x] Diagnostikovat a opravit selhávající sestavení aplikace SongCraft Studio.
 - [x] Nahradit přihlášení Manus soukromým přihlášením pro Temney, DJ Palačinka a Verču.
 - [x] Zajistit bezpečné ukládání hesel a oddělení dat mezi jednotlivými účty.
