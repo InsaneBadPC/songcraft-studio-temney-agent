@@ -88,6 +88,9 @@ export type StudioSnapshot = { albums: StudioAlbum[]; documents: StudioDocument[
 
 type SessionUser = { id: string };
 const mapTime = (value: string | null | undefined) => (value ? new Date(value) : null);
+// Delší platnost znamená, že otevřená knihovna nepřijde o obrázky po hodině.
+// Snapshot se navíc obnovuje při návratu do aplikace a průběžně během dne.
+const SIGNED_URL_TTL_SECONDS = 60 * 60 * 24;
 const signedUrl = async (storagePath: string | null, userId: string) => {
   if (!storagePath) return null;
   try {
@@ -96,7 +99,7 @@ const signedUrl = async (storagePath: string | null, userId: string) => {
     // A malformed legacy row must not become a cross-tenant signed URL.
     return null;
   }
-  const { data, error } = await supabase.storage.from("songcraft").createSignedUrl(storagePath, 60 * 60);
+  const { data, error } = await supabase.storage.from("songcraft").createSignedUrl(storagePath, SIGNED_URL_TTL_SECONDS);
   // Jedna poškozená nebo již neexistující příloha nesmí zablokovat celý katalog.
   if (error || !data?.signedUrl) return null;
   return data.signedUrl;
@@ -144,8 +147,10 @@ export async function getExternalStudioSnapshot(): Promise<StudioSnapshot> {
   // Nahraný obrázek v "Doprovodná média" má přednost před prázdným coverem.
   // Bere se jen první obrázek na píseň a jen jako zobrazení; cover_path se
   // nepřepisuje, aby smazání média neposlalo katalog na neexistující soubor.
+  // Doprovodná média jsou jen doplněk. Když jejich dotaz selže, katalog
+  // s vlastními cover_path musí zůstat funkční.
   const fallbackCovers = new Map<string, string>();
-  for (const row of assert(mediaImages.data, mediaImages.error)) {
+  for (const row of mediaImages.error ? [] : (mediaImages.data ?? [])) {
     if (!fallbackCovers.has(row.song_id)) fallbackCovers.set(row.song_id, row.storage_path);
   }
   return {

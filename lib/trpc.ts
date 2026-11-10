@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import type { PropsWithChildren } from "react";
+import { useEffect, type PropsWithChildren } from "react";
+import { AppState, Platform } from "react-native";
 
 import { useAuth } from "@/hooks/use-auth";
 import { normalizeOptionalId } from "@/lib/client-input";
@@ -26,11 +27,24 @@ function useStudioUtils() {
 
 function useStudioSnapshotQuery(_input?: undefined, options?: { enabled?: boolean }) {
   const { user } = useAuth();
-  return useQuery({
+  const queryClient = useQueryClient();
+  const query = useQuery({
     queryKey: studioSnapshotQueryKey(user?.id),
     queryFn: getExternalStudioSnapshot,
     enabled: Boolean(user?.id) && (options?.enabled ?? true),
+    // Podepsané URL obrázků platí 24 h. Obnovit je dřív, než vyprší, a to
+    // i po návratu z pozadí, kde se focus event na Androidu nespustí.
+    refetchInterval: 60 * 60 * 1000,
+    refetchOnWindowFocus: true,
   });
+  useEffect(() => {
+    if (Platform.OS === "web") return;
+    const subscription = AppState.addEventListener("change", (state) => {
+      if (state === "active") void queryClient.invalidateQueries({ queryKey: studioSnapshotQueryKey(user?.id) });
+    });
+    return () => subscription.remove();
+  }, [queryClient, user?.id]);
+  return query;
 }
 
 function useLogoutMutation() {
