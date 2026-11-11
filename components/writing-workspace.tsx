@@ -21,8 +21,9 @@ export type EditorHistory = {
   redo: () => void;
 };
 
-const SECTIONS = ["Intro", "Verse", "Chorus", "Bridge", "Outro"];
+const SECTIONS = ["Intro", "Verse", "Pre-Chorus", "Chorus", "Bridge", "Outro"];
 const PROMPT_TEMPLATE = "Žánr: \nTempo: \nNálada: \nNástroje: \nHlas: \nProdukce: ";
+const SONG_STRUCTURE = `[Intro]\n\n\n[Verse 1]\n\n\n[Pre-Chorus]\n\n\n[Chorus]\n\n\n[Verse 2]\n\n\n[Chorus]\n\n\n[Bridge]\n\n\n[Chorus]\n\n\n[Outro]\n`;
 
 export function WritingWorkspace({
   visible,
@@ -33,7 +34,9 @@ export function WritingWorkspace({
   prompt,
   onClose,
   onSave,
+  onComplete,
   saving,
+  completing,
 }: {
   visible: boolean;
   initialMode: WritingMode;
@@ -43,12 +46,17 @@ export function WritingWorkspace({
   prompt: EditorHistory;
   onClose: () => void;
   onSave: () => void | Promise<void>;
+  onComplete?: () => void | Promise<void>;
   saving?: boolean;
+  completing?: boolean;
 }) {
   const colors = useColors();
   const [mode, setMode] = useState<WritingMode>(initialMode);
   const [selection, setSelection] = useState({ start: 0, end: 0 });
   const [assistantOpen, setAssistantOpen] = useState(false);
+  const [toolsOpen, setToolsOpen] = useState(false);
+  const [findText, setFindText] = useState("");
+  const [replaceText, setReplaceText] = useState("");
   const inputRef = useRef<TextInput>(null);
   const valuesRef = useRef({ lyrics: lyrics.value, prompt: prompt.value });
   valuesRef.current = { lyrics: lyrics.value, prompt: prompt.value };
@@ -122,7 +130,25 @@ export function WritingWorkspace({
     );
   };
 
-  const statusLabel = status === "complete" ? "Hotová skladba" : "Rozpracovaný text";
+  const cleanBlankLines = () => {
+    const next = active.value.replace(/\n{3,}/g, "\n\n").trim();
+    active.change(next, false);
+    setToolsOpen(false);
+  };
+
+  const insertStructure = () => {
+    insertBlock(SONG_STRUCTURE.trim());
+    setToolsOpen(false);
+  };
+
+  const findReplace = () => {
+    if (!findText) return;
+    const next = active.value.split(findText).join(replaceText);
+    if (next !== active.value) active.change(next, false);
+    setToolsOpen(false);
+  };
+
+  const statusLabel = status === "complete" ? "Hotová skladba" : "Rozpracovaný koncept";
 
   return (
     <Modal visible={visible} animationType="slide" presentationStyle="fullScreen" onRequestClose={onClose}>
@@ -195,9 +221,23 @@ export function WritingWorkspace({
               {mode === "lyrics" ? <RhymeFinder variant="toolbar" onInsert={insertInline} /> : null}
               <ToolButton icon="auto-awesome" label="AI asistent" tone="primary" onPress={() => setAssistantOpen(true)} colors={colors} />
               {mode === "prompt" ? <ToolButton icon="dashboard-customize" label="Šablona" onPress={() => insertBlock(PROMPT_TEMPLATE)} colors={colors} /> : null}
+              {mode === "lyrics" ? <ToolButton icon="view-quilt" label="Struktura" onPress={insertStructure} colors={colors} /> : null}
+              <ToolButton icon="build" label="Nástroje" onPress={() => setToolsOpen(true)} colors={colors} />
               <ToolButton icon="content-copy" label="Kopírovat" disabled={!active.value.trim()} onPress={() => void copyText()} colors={colors} />
               <ToolButton icon="delete-outline" label="Vymazat" tone="danger" disabled={!active.value} onPress={clearText} colors={colors} />
             </View>
+            {mode === "lyrics" && status !== "complete" && onComplete ? (
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="Označit jako hotové"
+                disabled={saving || completing}
+                onPress={() => void onComplete()}
+                style={({ pressed }) => [styles.completeButton, { backgroundColor: colors.success, opacity: saving || completing || pressed ? 0.65 : 1 }]}
+              >
+                {completing ? <ActivityIndicator size="small" color={OnPrimary} /> : <MaterialIcons name="task-alt" size={18} color={OnPrimary} />}
+                <Text style={[Type.label, styles.completeButtonText, { color: OnPrimary }]}>{completing ? "Dokončuji…" : "Označit jako hotové → Knihovna"}</Text>
+              </Pressable>
+            ) : null}
           </View>
         </KeyboardAvoidingView>
         <WritingAssistant
@@ -208,6 +248,23 @@ export function WritingWorkspace({
           onClose={() => setAssistantOpen(false)}
           onInsert={insertBlock}
         />
+        <Modal visible={toolsOpen} transparent animationType="fade" onRequestClose={() => setToolsOpen(false)}>
+          <Pressable style={styles.toolsShade} onPress={() => setToolsOpen(false)}>
+            <Pressable style={[styles.toolsSheet, { backgroundColor: colors.background, borderColor: colors.border }]} onPress={(e) => e.stopPropagation()}>
+              <Text style={[Type.heading, { color: colors.foreground }]}>Nástroje editoru</Text>
+              <View style={styles.toolsGrid}>
+                <ToolButton icon="format-line-spacing" label="Pročistit prázdné řádky" onPress={cleanBlankLines} colors={colors} />
+                {mode === "lyrics" ? <ToolButton icon="view-quilt" label="Vložit strukturu písně" onPress={insertStructure} colors={colors} /> : null}
+              </View>
+              <View style={[styles.findBox, { borderColor: colors.border, backgroundColor: colors.surface }]}>
+                <Text style={[Type.label, { color: colors.foreground }]}>Najít a nahradit</Text>
+                <TextInput value={findText} onChangeText={setFindText} placeholder="Najít…" placeholderTextColor={colors.muted} style={[styles.findInput, { color: colors.foreground, borderColor: colors.border }]} />
+                <TextInput value={replaceText} onChangeText={setReplaceText} placeholder="Nahradit…" placeholderTextColor={colors.muted} style={[styles.findInput, { color: colors.foreground, borderColor: colors.border }]} />
+                <ToolButton icon="find-replace" label="Nahradit vše" disabled={!findText} onPress={findReplace} colors={colors} />
+              </View>
+            </Pressable>
+          </Pressable>
+        </Modal>
       </ScreenContainer>
     </Modal>
   );
@@ -298,4 +355,11 @@ const styles = StyleSheet.create({
   sectionChip: { height: 31, borderRadius: Radius.pill, borderWidth: 1, paddingHorizontal: 10, alignItems: "center", justifyContent: "center" },
   toolbar: { flexDirection: "row", flexWrap: "wrap", gap: 8, paddingBottom: 4 },
   toolButton: { height: 40, borderRadius: Radius.pill, borderWidth: 1, paddingHorizontal: 12, flexDirection: "row", alignItems: "center", gap: 6 },
+  completeButton: { minHeight: 48, borderRadius: Radius.md, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, marginBottom: 4 },
+  completeButtonText: { fontWeight: "800" },
+  toolsShade: { flex: 1, backgroundColor: "rgba(0,0,0,0.5)", justifyContent: "flex-end" },
+  toolsSheet: { borderTopLeftRadius: 24, borderTopRightRadius: 24, borderWidth: 1, padding: 16, gap: 14, paddingBottom: 28 },
+  toolsGrid: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
+  findBox: { borderWidth: 1, borderRadius: Radius.md, padding: 12, gap: 8 },
+  findInput: { minHeight: 42, borderWidth: 1, borderRadius: Radius.sm, paddingHorizontal: 12, fontSize: 15 },
 });

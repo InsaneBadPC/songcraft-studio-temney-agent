@@ -27,6 +27,7 @@ export default function TextEditorScreen() {
   const userId = user?.id ?? null;
   const snapshot = trpc.studio.snapshot.useQuery(undefined, { enabled: isAuthenticated });
   const document = useMemo(() => snapshot.data?.documents.find((item) => item.id === id), [id, snapshot.data?.documents]);
+  const linkedSong = useMemo(() => snapshot.data?.songs.find((song) => song.sourceDocumentId === id), [id, snapshot.data?.songs]);
   const [form, setForm] = useState<EditorForm>(emptyForm);
   const [saving, setSaving] = useState(false);
   const [draftRestored, setDraftRestored] = useState(false);
@@ -99,6 +100,10 @@ export default function TextEditorScreen() {
   useDraftStorage(form, id, userId, draftReady, "text");
   if (isAuthenticated && userId && !draftReady && (!id || document)) return <ScreenContainer><LoadingState /></ScreenContainer>;
   if (id && snapshot.isLoading) return <ScreenContainer><LoadingState /></ScreenContainer>;
+  if (id && document?.status === "complete") {
+    if (linkedSong) { router.replace(`/song/${linkedSong.id}` as never); return <ScreenContainer><LoadingState /></ScreenContainer>; }
+    return <ScreenContainer className="p-5 justify-center"><View style={[styles.completeBox, { backgroundColor: `${colors.success}16`, borderColor: `${colors.success}55` }]}><MaterialIcons name="check-circle" size={23} color={colors.success} /><View style={styles.completeCopy}><Text style={[styles.completeTitle, { color: colors.foreground }]}>Hotový text je v Knihovně</Text><Text style={[styles.completeText, { color: colors.muted }]}>Tento koncept už byl dokončen a patří do Knihovny.</Text></View></View><PrimaryButton label="Otevřít Knihovnu" icon="library-music" onPress={() => router.replace("/(tabs)/library" as never)} /></ScreenContainer>;
+  }
 
   const save = async () => {
     if (!form.title.trim()) { Alert.alert("Chybí název", "Doplň název skladby nebo konceptu."); return null; }
@@ -136,7 +141,15 @@ export default function TextEditorScreen() {
       Alert.alert("Obal je stále ve frontě", "Bezplatná AI má nyní delší frontu. Zkus to za chvíli znovu.");
     } catch (error) { Alert.alert("Obrázek se nepodařilo vytvořit", error instanceof Error ? error.message : "Zkus to znovu za chvíli."); } finally { setCoverGenerating(false); }
   };
-  const markComplete = async () => { const saved = await save(); if (!saved) return; try { await complete.mutateAsync({ id: saved }); await utils.studio.snapshot.invalidate(); Alert.alert("Skladba je hotová", "Text byl zařazen do knihovny skladeb.", [{ text: "Otevřít knihovnu", onPress: () => router.replace("/(tabs)/library" as never) }]); } catch (error) { Alert.alert("Změna stavu se nezdařila", error instanceof Error ? error.message : "Zkus to znovu."); } };
+  const markComplete = async () => {
+    const saved = await save();
+    if (!saved) return;
+    try {
+      await complete.mutateAsync({ id: saved });
+      await utils.studio.snapshot.invalidate();
+      Alert.alert("Hotový text je v Knihovně", "Koncept byl označen jako hotový a přesunut do Knihovny, kde můžeš nahrát MP3, video a další média.", [{ text: "Otevřít knihovnu", onPress: () => router.replace("/(tabs)/library" as never) }, { text: "Zpět na texty", onPress: () => router.replace("/(tabs)/texts" as never) }]);
+    } catch (error) { Alert.alert("Změna stavu se nezdařila", error instanceof Error ? error.message : "Zkus to znovu."); }
+  };
   const updateLyrics = (lyrics: string, coalesce = true) => {
     lyricsHistory.change(lyrics, coalesce);
     setForm((current) => ({ ...current, lyrics }));
@@ -172,7 +185,7 @@ export default function TextEditorScreen() {
     <WritingCard icon="tune" label="Prompt stylu pro hudební generátor" helper="Žánr, tempo, nálada, nástroje, hlas…" value={form.stylePrompt} placeholder="Zatím prázdný. Otevři editor a napiš, jak má skladba znít." onPress={() => { setWorkspaceMode("prompt"); setWorkspaceOpen(true); }} />
     <WritingCard icon="edit-note" label="Text písně" helper="Sloky, refrén, bridge…" value={lyricsHistory.value} placeholder="Zatím prázdný text. Otevři editor a začni psát." lines={5} onPress={() => { setWorkspaceMode("lyrics"); setWorkspaceOpen(true); }} />
     <Field label="Poznámky k produkci" value={form.notes} onChangeText={(notes) => setForm((current) => ({ ...current, notes }))} placeholder="Aranž, reference, nápady na klip…" multiline />
-    <View style={[styles.completeBox, { backgroundColor: `${colors.success}16`, borderColor: `${colors.success}55` }]}><MaterialIcons name="check-circle" size={23} color={colors.success} /><View style={styles.completeCopy}><Text style={[styles.completeTitle, { color: colors.foreground }]}>Připraveno pro knihovnu?</Text><Text style={[styles.completeText, { color: colors.muted }]}>Označením zůstane dokument zachovaný a vytvoří se katalogová skladba.</Text></View></View><PrimaryButton label={document?.status === "complete" ? "Aktualizovat hotovou skladbu" : "Označit jako hotové"} icon="task-alt" onPress={() => void markComplete()} disabled={saving || complete.isPending} />
+    <View style={[styles.completeBox, { backgroundColor: `${colors.success}16`, borderColor: `${colors.success}55` }]}><MaterialIcons name="check-circle" size={23} color={colors.success} /><View style={styles.completeCopy}><Text style={[styles.completeTitle, { color: colors.foreground }]}>{document?.status === "complete" ? "Hotový text je v Knihovně" : "Koncept je připravený?"}</Text><Text style={[styles.completeText, { color: colors.muted }]}>{document?.status === "complete" ? "Tahle skladba už je hotová. Uprav ji v Knihovně, kde můžeš nahrát MP3, video a obrázky." : "Označením jako hotové se koncept přesune z Textů do Knihovny, kde k němu přidáš MP3, video a další média."}</Text></View></View>{document?.status === "complete" ? <PrimaryButton label="Otevřít v Knihovně" icon="library-music" onPress={() => router.replace("/(tabs)/library" as never)} /> : <PrimaryButton label="Označit jako hotové" icon="task-alt" onPress={() => void markComplete()} disabled={saving || complete.isPending} />}
    </ScrollView></KeyboardAvoidingView>
    <WritingWorkspace
      visible={workspaceOpen}
@@ -182,8 +195,10 @@ export default function TextEditorScreen() {
      lyrics={{ value: lyricsHistory.value, canUndo: lyricsHistory.canUndo, canRedo: lyricsHistory.canRedo, change: updateLyrics, undo: undoLyrics, redo: redoLyrics }}
      prompt={{ value: promptHistory.value, canUndo: promptHistory.canUndo, canRedo: promptHistory.canRedo, change: updatePrompt, undo: undoPrompt, redo: redoPrompt }}
      saving={saving}
+     completing={complete.isPending}
      onClose={() => setWorkspaceOpen(false)}
      onSave={async () => { const saved = await save(); if (saved) setWorkspaceOpen(false); }}
+     onComplete={async () => { setWorkspaceOpen(false); await markComplete(); }}
    />
    </ScreenContainer>;
 }
