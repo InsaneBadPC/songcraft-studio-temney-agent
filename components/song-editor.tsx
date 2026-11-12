@@ -45,7 +45,6 @@ export function SongEditor({ songId }: { songId?: string }) {
   const [coverGenerating, setCoverGenerating] = useState(false);
   const [coverDialogVisible, setCoverDialogVisible] = useState(false);
   const [coverNote, setCoverNote] = useState("");
-  const [draftRestored, setDraftRestored] = useState(false);
   const [draftReady, setDraftReady] = useState(false);
   const draftRunRef = useRef(0);
   const lyricsHistory = useUndoableText("");
@@ -57,7 +56,6 @@ export function SongEditor({ songId }: { songId?: string }) {
   useEffect(() => {
     const run = ++draftRunRef.current;
     setDraftReady(false);
-    setDraftRestored(false);
     if (!userId) {
       setForm(emptyForm);
       resetLyricsHistory("");
@@ -94,7 +92,6 @@ export function SongEditor({ songId }: { songId?: string }) {
       if (draft && shouldRestoreDraft(songUpdatedAt, draft.savedAt)) {
         setForm({ title: draft.title, albumId: draft.albumId, stylePrompts: draft.stylePrompts?.length ? draft.stylePrompts : [draft.stylePrompt || ""], lyrics: draft.lyrics, notes: draft.notes, coverStorageKey: draft.coverStorageKey, coverUrl: draft.coverUrl, sourceVideoStorageKey: draft.sourceVideoStorageKey ?? null });
         resetLyricsHistory(draft.lyrics);
-        setDraftRestored(true);
       } else if (draft) {
         void clearDraft(songId ?? null, userId, "song");
       }
@@ -205,7 +202,6 @@ export function SongEditor({ songId }: { songId?: string }) {
       const savedId = songId ? (await update.mutateAsync({ id: songId, ...payload }), songId) : await create.mutateAsync(payload);
       await clearDraft(songId ?? null, userId, "song");
       await clearDraft(savedId, userId, "song");
-      setDraftRestored(false);
       await utils.studio.snapshot.invalidate();
       router.replace(`/song/${savedId}` as never);
     } catch (error) { Alert.alert("Skladbu se nepodařilo uložit", error instanceof Error ? error.message : "Zkus to znovu."); } finally { setSaving(false); }
@@ -286,7 +282,7 @@ export function SongEditor({ songId }: { songId?: string }) {
     if (lyrics !== undefined) setForm((current) => ({ ...current, lyrics }));
   };
 
-  return <ScreenContainer edges={["top", "bottom", "left", "right"]}><KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : "height"} keyboardVerticalOffset={0} style={{ flex: 1 }}><ScrollView contentContainerStyle={[styles.content, { paddingBottom: 180 }]} keyboardShouldPersistTaps="handled" keyboardDismissMode="interactive" automaticallyAdjustKeyboardInsets>{draftRestored ? <View style={[styles.draftNotice, { backgroundColor: `${colors.accent}14`, borderColor: `${colors.accent}55` }]}><MaterialIcons name="restore" size={16} color={colors.accent} /><Text style={[styles.draftNoticeText, { color: colors.foreground }]}>Obnoven rozpracovaný text — klepni na Uložit pro potvrzení.</Text></View> : null}<View style={styles.topbar}><IconButton label="Zpět" icon="arrow-back" onPress={() => router.back()} /><Text numberOfLines={1} style={[styles.topbarName, { color: colors.foreground }]}>{songId ? "Upravit skladbu" : "Nová skladba"}</Text><Pressable onPress={() => void save()} style={({ pressed }) => [styles.save, { opacity: saving || pressed ? 0.6 : 1 }]}><Text style={[styles.saveText, { color: colors.primary }]}>{saving ? "Ukládám" : "Uložit"}</Text></Pressable></View>
+  return <ScreenContainer edges={["top", "bottom", "left", "right"]}><KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : "height"} keyboardVerticalOffset={0} style={{ flex: 1 }}><ScrollView contentContainerStyle={[styles.content, { paddingBottom: 180 }]} keyboardShouldPersistTaps="handled" keyboardDismissMode="interactive" automaticallyAdjustKeyboardInsets><View style={styles.topbar}><IconButton label="Zpět" icon="arrow-back" onPress={() => router.back()} /><Text numberOfLines={1} style={[styles.topbarName, { color: colors.foreground }]}>{songId ? "Upravit skladbu" : "Nová skladba"}</Text><Pressable onPress={() => void save()} style={({ pressed }) => [styles.save, { opacity: saving || pressed ? 0.6 : 1 }]}><Text style={[styles.saveText, { color: colors.primary }]}>{saving ? "Ukládám" : "Uložit"}</Text></Pressable></View>
     <View style={[styles.flow, { backgroundColor: `${colors.primary}13`, borderColor: `${colors.primary}45` }]}><MaterialIcons name="account-tree" size={20} color={colors.primary} /><Text style={[styles.flowText, { color: colors.muted }]}>Tato položka drží pohromadě text, obrázek, MP3 verze, metadata a album.</Text></View>
     <View style={styles.coverBlock}><Pressable onPress={() => void uploadCover()} style={({ pressed }) => [styles.cover, { borderColor: colors.border, backgroundColor: colors.surface, opacity: pressed ? 0.72 : 1 }]}>{form.coverUrl ? <Image source={{ uri: form.coverUrl }} style={styles.coverImage} resizeMode="contain" /> : <><View style={[styles.coverIcon, { backgroundColor: `${colors.primary}20` }]}><MaterialIcons name="add-photo-alternate" size={25} color={colors.primary} /></View><Text style={[styles.coverTitle, { color: colors.foreground }]}>Přidat vlastní obrázek skladby</Text><Text style={[styles.coverText, { color: colors.muted }]}>Celá kompozice bez ořezu v 16:9 pro katalog i YouTube video.</Text></>}</Pressable><Pressable onPress={openCoverDialog} disabled={coverGenerating} style={({ pressed }) => [styles.generateCover, { borderColor: colors.primary, backgroundColor: `${colors.primary}12`, opacity: coverGenerating || pressed ? 0.62 : 1 }]}><MaterialIcons name={coverGenerating ? "hourglass-top" : "auto-awesome"} size={19} color={colors.primary} /><View style={styles.generateCopy}><Text style={[styles.generateTitle, { color: colors.primary }]}>{coverGenerating ? "Bezplatná AI vytváří 16:9 obal…" : "Vygenerovat obrázek skladby"}</Text><Text style={[styles.generateText, { color: colors.muted }]}>{songId ? "16:9 obraz s pevně vloženým Temney, albem a názvem skladby." : "Nejprve skladbu ulož, pak můžeš vytvořit obal."}</Text></View></Pressable><Pressable onPress={() => void uploadVideo()} style={({ pressed }) => [styles.generateCover, { borderColor: colors.border, backgroundColor: `${colors.muted}12`, opacity: pressed ? 0.62 : 1 }]}><MaterialIcons name={form.sourceVideoStorageKey ? "movie" : "video-library"} size={19} color={colors.muted} /><View style={styles.generateCopy}><Text style={[styles.generateTitle, { color: colors.muted }]}>{form.sourceVideoStorageKey ? "Video skladby je nahrané" : "Nahrát video místo obrázku"}</Text><Text style={[styles.generateText, { color: colors.muted }]}>Z krátkého MP4 udělá render smyčku přes celou skladbu.</Text></View></Pressable><Pressable onPress={() => setGalleryOpen(true)} style={({ pressed }) => [styles.generateCover, { borderColor: colors.borderStrong ?? colors.border, backgroundColor: `${colors.primary}12`, opacity: pressed ? 0.62 : 1 }]}><MaterialIcons name="perm-media" size={19} color={colors.primary} /><View style={styles.generateCopy}><Text style={[styles.generateTitle, { color: colors.primary }]}>Doprovodná média skladby</Text><Text style={[styles.generateText, { color: colors.muted }]}>Víc obrázků nebo videí, ze kterých render poskládá video: 5 s obál, scény po 8 s, 5 s obál.</Text></View></Pressable></View>
     <Field label="Název skladby" value={form.title} onChangeText={(title) => setForm((current) => ({ ...current, title }))} placeholder="Např. Noční signál" autoFocus={!songId} />
@@ -317,7 +313,7 @@ function CoverGenerationDialog({ visible, title, albumName, lyrics, note, onChan
 function ContextLine({ label, value, colors }: { label: string; value: string; colors: ReturnType<typeof useColors> }) { return <View style={[styles.contextLine, { backgroundColor: colors.surface, borderColor: colors.border }]}><Text style={[styles.contextLabel, { color: colors.muted }]}>{label}</Text><Text numberOfLines={2} style={[styles.contextValue, { color: colors.foreground }]}>{value}</Text></View>; }
 
 const styles = StyleSheet.create({
-  content: { padding: 20, paddingTop: 14, paddingBottom: 38, gap: 18 }, draftNotice: { flexDirection: "row", alignItems: "center", gap: 8, borderWidth: 1, borderRadius: Radius.sm, paddingHorizontal: 12, paddingVertical: 9 }, draftNoticeText: { flex: 1, fontSize: 12.5, lineHeight: 17, fontWeight: "600" }, topbar: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 12 }, topbarName: { flex: 1, fontSize: 15, fontWeight: "800", textAlign: "center" }, save: { minWidth: 49, minHeight: 42, alignItems: "flex-end", justifyContent: "center" }, saveText: { fontSize: Type.label.fontSize, lineHeight: Type.label.lineHeight, fontWeight: "800" }, flow: { borderWidth: 1, borderRadius: Radius.md, padding: 13, flexDirection: "row", gap: 9, alignItems: "center" }, flowText: { flex: 1, ...Type.caption, lineHeight: 17 },
+  content: { padding: 20, paddingTop: 14, paddingBottom: 38, gap: 18 }, topbar: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 12 }, topbarName: { flex: 1, fontSize: 15, fontWeight: "800", textAlign: "center" }, save: { minWidth: 49, minHeight: 42, alignItems: "flex-end", justifyContent: "center" }, saveText: { fontSize: Type.label.fontSize, lineHeight: Type.label.lineHeight, fontWeight: "800" }, flow: { borderWidth: 1, borderRadius: Radius.md, padding: 13, flexDirection: "row", gap: 9, alignItems: "center" }, flowText: { flex: 1, ...Type.caption, lineHeight: 17 },
   promptTools: { flexDirection: "row", gap: 8 },
   promptTool: { borderWidth: 1, borderRadius: Radius.sm, paddingHorizontal: 12, height: 34, flexDirection: "row", alignItems: "center", gap: 6 },
   promptToolText: { fontSize: 12.5, fontWeight: "800" },

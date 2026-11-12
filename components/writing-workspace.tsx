@@ -2,7 +2,7 @@ import MaterialIcons from "@expo/vector-icons/MaterialIcons";
 import * as Clipboard from "expo-clipboard";
 import * as Haptics from "expo-haptics";
 import { useEffect, useRef, useState } from "react";
-import { ActivityIndicator, Alert, KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import { ActivityIndicator, Alert, BackHandler, KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 
 import { IconButton } from "@/components/studio-ui";
 import { ScreenContainer } from "@/components/screen-container";
@@ -26,7 +26,6 @@ const PROMPT_TEMPLATE = "Žánr: \nTempo: \nNálada: \nNástroje: \nHlas: \nProd
 const SONG_STRUCTURE = `[Intro]\n\n\n[Verse 1]\n\n\n[Pre-Chorus]\n\n\n[Chorus]\n\n\n[Verse 2]\n\n\n[Chorus]\n\n\n[Bridge]\n\n\n[Chorus]\n\n\n[Outro]\n`;
 
 export function WritingWorkspace({
-  visible,
   initialMode,
   title,
   status,
@@ -38,7 +37,6 @@ export function WritingWorkspace({
   saving,
   completing,
 }: {
-  visible: boolean;
   initialMode: WritingMode;
   title: string;
   status?: string;
@@ -52,23 +50,25 @@ export function WritingWorkspace({
 }) {
   const colors = useColors();
   const [mode, setMode] = useState<WritingMode>(initialMode);
-  const [selection, setSelection] = useState({ start: 0, end: 0 });
+  const [selection, setSelection] = useState(() => {
+    const value = initialMode === "lyrics" ? lyrics.value : prompt.value;
+    return { start: value.length, end: value.length };
+  });
   const [assistantOpen, setAssistantOpen] = useState(false);
   const [toolsOpen, setToolsOpen] = useState(false);
   const [findText, setFindText] = useState("");
   const [replaceText, setReplaceText] = useState("");
   const inputRef = useRef<TextInput>(null);
-  const valuesRef = useRef({ lyrics: lyrics.value, prompt: prompt.value });
-  valuesRef.current = { lyrics: lyrics.value, prompt: prompt.value };
   const active = mode === "lyrics" ? lyrics : prompt;
 
   useEffect(() => {
-    if (!visible) return;
-    setMode(initialMode);
-    setAssistantOpen(false);
-    const value = initialMode === "lyrics" ? valuesRef.current.lyrics : valuesRef.current.prompt;
-    setSelection({ start: value.length, end: value.length });
-  }, [initialMode, visible]);
+    if (Platform.OS !== "android") return;
+    const subscription = BackHandler.addEventListener("hardwareBackPress", () => {
+      onClose();
+      return true;
+    });
+    return () => subscription.remove();
+  }, [onClose]);
 
   const switchMode = (next: WritingMode) => {
     if (next === mode) return;
@@ -108,13 +108,46 @@ export function WritingWorkspace({
     setTimeout(() => inputRef.current?.focus(), 30);
   };
 
+  const replaceSelection = (text: string) => {
+    const current = active.value;
+    const start = Math.min(selection.start, selection.end, current.length);
+    const end = Math.min(Math.max(selection.start, selection.end), current.length);
+    const next = `${current.slice(0, start)}${text}${current.slice(end)}`;
+    active.change(next, false);
+    const cursor = start + text.length;
+    setSelection({ start: cursor, end: cursor });
+    setTimeout(() => inputRef.current?.focus(), 30);
+  };
+
+  const selectAll = () => {
+    if (!active.value) return;
+    setSelection({ start: 0, end: active.value.length });
+    setTimeout(() => inputRef.current?.focus(), 30);
+  };
+
   const copyText = async () => {
     if (!active.value.trim()) return;
+    const start = Math.min(selection.start, selection.end);
+    const end = Math.max(selection.start, selection.end);
+    const selected = active.value.slice(start, end);
     try {
-      await Clipboard.setStringAsync(active.value);
-      Alert.alert("Zkopírováno", mode === "lyrics" ? "Text písně je ve schránce." : "Prompt je ve schránce.");
+      await Clipboard.setStringAsync(selected || active.value);
+      Alert.alert("Zkopírováno", selected ? "Vybraný text je ve schránce." : mode === "lyrics" ? "Text písně je ve schránce." : "Prompt je ve schránce.");
     } catch {
       Alert.alert("Kopírování se nezdařilo", "Zkus to znovu.");
+    }
+  };
+
+  const pasteText = async () => {
+    try {
+      const text = await Clipboard.getStringAsync();
+      if (!text) {
+        Alert.alert("Schránka je prázdná", "Nejdřív zkopíruj text, který chceš vložit.");
+        return;
+      }
+      replaceSelection(text);
+    } catch {
+      Alert.alert("Vložení se nezdařilo", "Zkus to znovu.");
     }
   };
 
@@ -151,8 +184,7 @@ export function WritingWorkspace({
   const statusLabel = status === "complete" ? "Hotová skladba" : "Rozpracovaný koncept";
 
   return (
-    <Modal visible={visible} animationType="slide" presentationStyle="fullScreen" onRequestClose={onClose}>
-      <ScreenContainer edges={["top", "bottom", "left", "right"]}>
+    <ScreenContainer edges={["top", "bottom", "left", "right"]}>
         <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : "height"} style={styles.keyboard}>
           <View style={styles.content}>
             <View style={styles.topbar}>
@@ -186,6 +218,7 @@ export function WritingWorkspace({
               <TextInput
                 ref={inputRef}
                 value={active.value}
+                selection={selection}
                 onChangeText={(next) => active.change(next)}
                 onSelectionChange={(event) => setSelection(event.nativeEvent.selection)}
                 placeholder={mode === "lyrics" ? "[Verse]\nPíšu první řádek…" : "Žánr, tempo, nálada, nástroje, hlas…"}
@@ -196,6 +229,12 @@ export function WritingWorkspace({
                 disableFullscreenUI
                 style={[styles.editorInput, { color: colors.foreground }]}
               />
+            </View>
+
+            <View style={styles.clipboardRow}>
+              <ToolButton icon="select-all" label="Vybrat vše" disabled={!active.value} onPress={selectAll} colors={colors} />
+              <ToolButton icon="content-copy" label="Kopírovat" disabled={!active.value.trim()} onPress={() => void copyText()} colors={colors} />
+              <ToolButton icon="content-paste" label="Vložit" onPress={() => void pasteText()} colors={colors} />
             </View>
 
             {mode === "lyrics" ? (
@@ -223,7 +262,6 @@ export function WritingWorkspace({
               {mode === "prompt" ? <ToolButton icon="dashboard-customize" label="Šablona" onPress={() => insertBlock(PROMPT_TEMPLATE)} colors={colors} /> : null}
               {mode === "lyrics" ? <ToolButton icon="view-quilt" label="Struktura" onPress={insertStructure} colors={colors} /> : null}
               <ToolButton icon="build" label="Nástroje" onPress={() => setToolsOpen(true)} colors={colors} />
-              <ToolButton icon="content-copy" label="Kopírovat" disabled={!active.value.trim()} onPress={() => void copyText()} colors={colors} />
               <ToolButton icon="delete-outline" label="Vymazat" tone="danger" disabled={!active.value} onPress={clearText} colors={colors} />
             </View>
             {mode === "lyrics" && status !== "complete" && onComplete ? (
@@ -265,8 +303,7 @@ export function WritingWorkspace({
             </Pressable>
           </Pressable>
         </Modal>
-      </ScreenContainer>
-    </Modal>
+    </ScreenContainer>
   );
 }
 
@@ -349,6 +386,7 @@ const styles = StyleSheet.create({
   editorHead: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 10, paddingHorizontal: 14, paddingVertical: 10, borderBottomWidth: 1 },
   editorLabel: { fontWeight: "800" },
   editorInput: { flex: 1, paddingHorizontal: 14, paddingVertical: 12, fontSize: 16, lineHeight: 24 },
+  clipboardRow: { flexDirection: "row", gap: 8 },
   sectionRow: { gap: 5 },
   sectionLabel: { textTransform: "uppercase", letterSpacing: 0.5 },
   sectionChips: { gap: 6, paddingRight: 8 },
