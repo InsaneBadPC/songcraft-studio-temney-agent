@@ -131,6 +131,7 @@ export default function LibraryScreen() {
         }
         renderItem={({ item, index }) => {
           const source = snapshot.data?.documents.find((d) => d.id === (item as any).sourceDocumentId);
+          const textComplete = source?.status === "complete";
           const songVersions = snapshot.data?.versions.filter((v) => v.songId === item.id) ?? [];
           const finalVersion = songVersions.find((v) => v.isFinal);
           const album = snapshot.data?.albums.find((a) => a.id === item.albumId);
@@ -141,12 +142,17 @@ export default function LibraryScreen() {
                 <CoverArt uri={(item as any).coverUrl ?? (source as any)?.coverUrl ?? (album as any)?.coverUrl} title={item.title} size={64} />
                 <View style={styles.copy}>
                   <Text numberOfLines={1} style={[styles.songName, { color: colors.foreground }]}>{item.title}</Text>
-                  <Text numberOfLines={1} style={[styles.songMeta, { color: colors.muted }]}>{album?.name ?? "Bez alba"} • {songVersions.length} {songVersions.length === 1 ? "verze" : "verzí"} • {isPublished ? "na YouTube" : finalVersion ? "připraveno" : "koncept"}</Text>
+                  <Text numberOfLines={1} style={[styles.songMeta, { color: colors.muted }]}>{album?.name ?? "Bez alba"} • {songVersions.length} {songVersions.length === 1 ? "verze" : "verzí"} • {isPublished ? "na YouTube" : finalVersion ? "připraveno" : textComplete ? "hotovo" : "koncept"}</Text>
                   <View style={styles.badges}>
                     {finalVersion ? (
                       <View style={[styles.badge, { backgroundColor: "rgba(16,185,129,0.12)", borderColor: "rgba(16,185,129,0.22)" }]}>
                         <MaterialIcons name="verified" size={12} color={colors.success} />
                         <Text style={[styles.badgeText, { color: colors.success }]}>{finalVersion.label}</Text>
+                      </View>
+                    ) : textComplete ? (
+                      <View style={[styles.badge, { backgroundColor: "rgba(16,185,129,0.12)", borderColor: "rgba(16,185,129,0.22)" }]}>
+                        <MaterialIcons name="check-circle" size={12} color={colors.success} />
+                        <Text style={[styles.badgeText, { color: colors.success }]}>hotovo</Text>
                       </View>
                     ) : (
                       <View style={[styles.badge, { backgroundColor: "rgba(148,163,184,0.10)", borderColor: "rgba(255,255,255,0.08)" }]}>
