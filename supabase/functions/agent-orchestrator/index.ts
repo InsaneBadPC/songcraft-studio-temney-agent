@@ -1749,7 +1749,7 @@ function pendingOp(op: { id: string; kind: string; summary: string; token: strin
     if (!summary) {
       summary = await Promise.race([
         describeSongShort(admin, userId, song),
-        new Promise<string>((resolve) => setTimeout(() => resolve(""), 15_000)),
+        new Promise<string>((resolve) => setTimeout(() => resolve(""), 30_000)),
       ]).catch(() => "");
       if (summary) descriptionSource = "llm";
     }
