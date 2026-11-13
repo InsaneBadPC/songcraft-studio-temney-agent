@@ -8,12 +8,13 @@ import { Alert, FlatList, KeyboardAvoidingView, Platform, Pressable, ScrollView,
 import Animated, { FadeInDown, FadeInUp, Layout } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
-import { EmptyState, Shimmer, StudioHeader } from "@/components/studio-ui";
+import { Shimmer, StudioHeader } from "@/components/studio-ui";
 import { ScreenContainer } from "@/components/screen-container";
 import { startPrivateLogin } from "@/constants/oauth";
 import { askSongCraftAgent, confirmSongCraftAction, isConfirmableAction, type AgentPendingAction } from "@/lib/agent-api";
 import type { StudioAssistantMessage } from "@/lib/assistant-chat";
 import { MAX_ASSISTANT_CONVERSATIONS, upsertAssistantConversation, type AssistantConversation } from "@/lib/assistant-history";
+import { useAssistantVoice } from "@/hooks/use-assistant-voice";
 import { useAuth } from "@/hooks/use-auth";
 import { useColors } from "@/hooks/use-colors";
 import { OnPrimary, Radius, Type } from "@/lib/design-tokens";
@@ -49,9 +50,12 @@ export default function AssistantScreen() {
   const loadedUserIdRef = useRef<string | null>(null);
   const conversationsRef = useRef<Conversation[]>([]);
   const activeIdRef = useRef<string | null>(null);
+  const sendRef = useRef<(text?: string) => void>(() => {});
   activeUserIdRef.current = user?.id ?? null;
   conversationsRef.current = conversations;
   activeIdRef.current = activeId;
+  const voice = useAssistantVoice({ onTranscript: (text) => sendRef.current(text) });
+  const stopVoice = voice.stopSpeaking;
 
   const readHistory = useCallback(async (uid: string): Promise<Conversation[] | null> => {
     try {
@@ -116,22 +120,43 @@ export default function AssistantScreen() {
     const uid = user?.id;
     if (!uid) return;
     Haptics.selectionAsync().catch(()=>{});
+    stopVoice();
     let convs = conversations;
     if (messages.length) { const res = upsertCurrent(messages, activeId, conversations); convs = res.convs; await persist(uid, convs); }
     if (activeUserIdRef.current !== uid) return;
     setMessages([]); setActiveId(null); setError(null); setPendingActions([]); setServerConversationId(null);
-  }, [user?.id, messages, activeId, conversations, persist, upsertCurrent]);
+  }, [user?.id, messages, activeId, conversations, persist, upsertCurrent, stopVoice]);
 
   const switchConversation = useCallback((id: string) => {
     Haptics.selectionAsync().catch(()=>{});
     const conv = conversations.find((c) => c.id === id);
     if (!conv) return;
+    stopVoice();
     setActiveId(id); setMessages(conv.messages); setError(null); setPendingActions([]); setServerConversationId(null);
-  }, [conversations]);
+  }, [conversations, stopVoice]);
 
   const listHeader = useMemo(() => (
     <>
-      <StudioHeader eyebrow="Experimentální větev" title="Asistent" />
+      <StudioHeader
+        eyebrow="Experimentální větev"
+        title="Asistent"
+        action={
+          <Pressable
+            accessibilityRole="switch"
+            accessibilityState={{ checked: voice.autoSpeak }}
+            accessibilityLabel="Číst odpovědi nahlas"
+            onPress={voice.toggleAutoSpeak}
+            style={({ pressed }) => [styles.voiceToggle, {
+              backgroundColor: voice.autoSpeak ? `${colors.primary}1A` : colors.surface,
+              borderColor: voice.autoSpeak ? `${colors.primary}66` : "rgba(255,255,255,0.10)",
+              opacity: pressed ? 0.8 : 1,
+            }]}
+          >
+            <MaterialIcons name={voice.autoSpeak ? "volume-up" : "volume-off"} size={16} color={voice.autoSpeak ? colors.primary : colors.muted} />
+            <Text style={[styles.voiceToggleText, { color: voice.autoSpeak ? colors.primary : colors.muted }]}>Hlas</Text>
+          </Pressable>
+        }
+      />
       <View style={[styles.notice, { backgroundColor: colors.surface, borderColor: "rgba(255,255,255,0.08)", shadowColor: "#000", shadowOpacity: 0.12, shadowRadius: 12, shadowOffset: { width: 0, height: 4 }, elevation: 4 }]}>
         <View style={[styles.noticeIcon, { backgroundColor: `${colors.primary}14`, borderColor: "rgba(255,255,255,0.08)" }]}><MaterialIcons name="privacy-tip" size={18} color={colors.primary} /></View>
         <Text style={[styles.noticeText, { color: colors.muted }]}>Pracuje jen s tvými texty, alby a skladbami. Akce s veřejným dopadem vyžadují potvrzení.</Text>
@@ -172,12 +197,13 @@ export default function AssistantScreen() {
         </View>
       ) : null}
     </>
-  ), [colors, hasMessages, inputDisabled, conversations, activeId, startNewConversation, switchConversation, isAuthenticated]);
+  ), [colors, hasMessages, inputDisabled, conversations, activeId, startNewConversation, switchConversation, isAuthenticated, voice.autoSpeak, voice.toggleAutoSpeak]);
 
   async function send(text = draft) {
     const content = text.trim();
     const requestUserId = user?.id;
     if (!content || sending || !requestUserId) return;
+    stopVoice();
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(()=>{});
     const userMessage: StudioAssistantMessage = { id: `user-${Date.now()}`, role: "user", content };
     const history = [...messages, userMessage];
@@ -185,14 +211,17 @@ export default function AssistantScreen() {
     try {
       const result = await askSongCraftAgent(content, messages, serverConversationId);
       if (activeUserIdRef.current !== requestUserId) return;
-      const withAnswer: StudioAssistantMessage[] = [...history, { id: `assistant-${Date.now()}`, role: "assistant", content: result.answer }];
+      const answerId = `assistant-${Date.now()}`;
+      const withAnswer: StudioAssistantMessage[] = [...history, { id: answerId, role: "assistant", content: result.answer }];
       setMessages(withAnswer);
       setPendingActions(result.pending);
       if (result.conversationId) setServerConversationId(result.conversationId);
       const { convs, id } = upsertCurrent(withAnswer, activeIdRef.current, conversationsRef.current);
       setConversations(convs); setActiveId(id); await persist(requestUserId, convs);
+      if (voice.autoSpeak && activeUserIdRef.current === requestUserId) voice.speak(answerId, result.answer);
     } catch (caught) { if (activeUserIdRef.current === requestUserId) setError(caught instanceof Error ? caught.message : "Asistent nyní není dostupný."); } finally { if (activeUserIdRef.current === requestUserId) setSending(false); }
   }
+  sendRef.current = send;
 
   async function confirmAction(action: AgentPendingAction) {
     if (!isConfirmableAction(action.tool) || !action.confirmationId || !action.confirmationToken || confirming) return;
@@ -250,7 +279,12 @@ export default function AssistantScreen() {
                   <View style={[styles.roleDot, { backgroundColor: item.role === "user" ? "#FFFFFF" : colors.primary }]} />
                   <Text style={[styles.messageRole, { color: item.role === "user" ? "#FFFFFF" : colors.primary }]}>{item.role === "user" ? "Ty" : "Asistent"}</Text>
                 </View>
-                {item.role === "assistant" ? <Pressable onPress={() => void copyMessage(item.content)} hitSlop={8} style={({ pressed }) => [styles.copyChip, { opacity: pressed ? 0.6 : 1, transform: [{ scale: pressed ? 0.97 : 1 }] }]}><MaterialIcons name="content-copy" size={13} color={colors.muted} /><Text style={[styles.copyChipText, { color: colors.muted }]}>Kopírovat</Text></Pressable> : null}
+                {item.role === "assistant" ? (
+                  <View style={styles.messageActions}>
+                    <Pressable accessibilityLabel={voice.speakingId === item.id ? "Zastavit čtení" : "Přečíst nahlas"} onPress={() => voice.speakingId === item.id ? stopVoice() : voice.speak(item.id, item.content)} hitSlop={8} style={({ pressed }) => [styles.copyChip, { opacity: pressed ? 0.6 : 1, transform: [{ scale: pressed ? 0.97 : 1 }] }]}><MaterialIcons name={voice.speakingId === item.id ? "stop-circle" : "volume-up"} size={13} color={colors.primary} /><Text style={[styles.copyChipText, { color: colors.primary }]}>{voice.speakingId === item.id ? "Zastavit" : "Přečíst"}</Text></Pressable>
+                    <Pressable onPress={() => void copyMessage(item.content)} hitSlop={8} style={({ pressed }) => [styles.copyChip, { opacity: pressed ? 0.6 : 1, transform: [{ scale: pressed ? 0.97 : 1 }] }]}><MaterialIcons name="content-copy" size={13} color={colors.muted} /><Text style={[styles.copyChipText, { color: colors.muted }]}>Kopírovat</Text></Pressable>
+                  </View>
+                ) : null}
               </View>
               <Text selectable style={[styles.messageText, { color: item.role === "user" ? "#FFFFFF" : colors.foreground }]}>{item.content}</Text>
             </Animated.View>
@@ -262,7 +296,29 @@ export default function AssistantScreen() {
           {pendingActions.map((action) => <View key={action.confirmationId ?? action.tool} style={styles.pendingAction}><View style={styles.pendingCopy}><Text style={[styles.pendingActionTitle, { color: colors.foreground }]}>{ACTION_LABELS[action.tool] ?? action.tool}</Text><Text style={[styles.pendingActionText, { color: colors.muted }]}>{typeof action.summary === "string" && action.summary ? action.summary : action.tool === "publish_to_youtube" ? "Veřejná změna se zatím neprovedla." : "Čeká na tvoje potvrzení."}</Text></View>{isConfirmableAction(action.tool) && action.confirmationId && action.confirmationToken ? <Pressable disabled={confirming} onPress={() => void confirmAction(action)} style={({ pressed }) => [styles.confirmButton, { opacity: confirming || pressed ? 0.6 : 1 }]}><Text style={styles.confirmButtonText}>{confirming ? "Ověřuji…" : "Potvrdit"}</Text></Pressable> : null}</View>)}
         </View> : null}
         {error ? <Animated.View entering={FadeInDown.duration(300)} style={[styles.errorBox, { backgroundColor: "rgba(239,68,68,0.10)", borderColor: "rgba(239,68,68,0.22)" }]}><MaterialIcons name="error-outline" size={16} color={colors.error} /><Text style={[styles.errorText, { color: colors.error }]}>{error}</Text></Animated.View> : null}
+        {voice.listening || voice.interim || voice.status ? (
+          <Animated.View entering={FadeInUp.duration(220)} style={[styles.voiceStatus, { backgroundColor: `${colors.primary}10`, borderColor: `${colors.primary}33` }]}>
+            <View style={[styles.voiceDot, { backgroundColor: voice.listening ? colors.primary : colors.muted }]} />
+            <Text numberOfLines={2} style={[styles.voiceStatusText, { color: colors.foreground }]}>{voice.interim || (voice.listening ? "Poslouchám…" : voice.status)}</Text>
+            <Pressable accessibilityLabel={voice.listening ? "Zrušit hlasový vstup" : "Zavřít hlášení"} onPress={voice.listening ? voice.cancelListening : voice.clearStatus} hitSlop={8}><MaterialIcons name="close" size={16} color={colors.muted} /></Pressable>
+          </Animated.View>
+        ) : null}
         <View style={[styles.composer, { backgroundColor: colors.surface, borderColor: "rgba(255,255,255,0.08)", shadowColor: "#000", shadowOpacity: 0.16, shadowRadius: 16, elevation: 8, paddingBottom: insets.bottom ? 8 : 8 }]}>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={voice.listening ? "Ukončit hlasový vstup" : "Hlasový vstup"}
+            accessibilityState={{ busy: voice.listening }}
+            onPress={() => { Haptics.selectionAsync().catch(()=>{}); if (voice.listening) voice.stopListening(); else void voice.startListening(); }}
+            disabled={inputDisabled}
+            style={({ pressed }) => [styles.micButton, {
+              backgroundColor: voice.listening ? colors.error : "rgba(255,255,255,0.06)",
+              borderColor: voice.listening ? colors.error : "rgba(255,255,255,0.10)",
+              opacity: inputDisabled ? 0.5 : pressed ? 0.85 : 1,
+              transform: [{ scale: pressed && !inputDisabled ? 0.96 : 1 }],
+            }]}
+          >
+            <MaterialIcons name={voice.listening ? "stop" : "mic"} size={20} color={voice.listening ? "#FFFFFF" : colors.foreground} />
+          </Pressable>
           <TextInput value={draft} onChangeText={setDraft} editable={!inputDisabled} multiline maxLength={1000} placeholder="Zeptej se na skladby, texty nebo alba…" placeholderTextColor={colors.muted} style={[styles.input, { color: colors.foreground }]} />
           <Pressable onPress={() => void send()} disabled={!draft.trim() || inputDisabled} style={({ pressed }) => [styles.send, { backgroundColor: !draft.trim() || inputDisabled ? "rgba(255,255,255,0.08)" : colors.primary, opacity: pressed ? 0.9 : 1, transform: [{ scale: pressed && draft.trim() ? 0.97 : 1 }] }]}>
             <MaterialIcons name="arrow-upward" size={20} color={!draft.trim() || inputDisabled ? colors.muted : "#FFFFFF"} />
@@ -276,6 +332,8 @@ export default function AssistantScreen() {
 const styles = StyleSheet.create({
   grow: { flex: 1 },
   content: { flexGrow: 1, paddingTop: 14, paddingBottom: 14, gap: 12 },
+  voiceToggle: { flexDirection: "row", alignItems: "center", gap: 5, height: 32, paddingHorizontal: 10, borderRadius: Radius.sm, borderWidth: 1 },
+  voiceToggleText: { ...Type.caption, fontWeight: "700" },
   notice: { flexDirection: "row", gap: 12, borderRadius: Radius.lg, borderWidth: 1, padding: 14, marginBottom: 14, alignItems: "center" },
   noticeIcon: { width: 36, height: 36, borderRadius: Radius.sm, borderWidth: 1, alignItems: "center", justifyContent: "center" },
   noticeText: { flex: 1, ...Type.caption },
@@ -296,6 +354,7 @@ const styles = StyleSheet.create({
   disclaimer: { ...Type.caption, lineHeight: 15, marginTop: 6, textAlign: "center", opacity: 0.7 },
   message: { maxWidth: "88%", borderRadius: Radius.lg, padding: 14, gap: 8, borderWidth: 1 },
   messageHead: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 10 },
+  messageActions: { flexDirection: "row", alignItems: "center", gap: 6 },
   roleRow: { flexDirection: "row", alignItems: "center", gap: 6 },
   roleDot: { width: 6, height: 6, borderRadius: 3 },
   copyChip: { flexDirection: "row", alignItems: "center", gap: 4, paddingHorizontal: 8, height: 26, borderRadius: Radius.sm, borderWidth: 1, borderColor: "rgba(255,255,255,0.10)", backgroundColor: "rgba(255,255,255,0.04)" },
@@ -319,7 +378,11 @@ const styles = StyleSheet.create({
   confirmButtonText: { color: OnPrimary, fontSize: Type.caption.fontSize, lineHeight: Type.caption.lineHeight, fontWeight: "900" },
   errorBox: { flexDirection: "row", gap: 8, alignItems: "center", borderWidth: 1, borderRadius: Radius.sm, padding: 12, marginBottom: 8 },
   errorText: { flex: 1, ...Type.caption },
+  voiceStatus: { flexDirection: "row", alignItems: "center", gap: 8, borderWidth: 1, borderRadius: Radius.md, paddingHorizontal: 12, paddingVertical: 9, marginBottom: 8 },
+  voiceDot: { width: 7, height: 7, borderRadius: 4 },
+  voiceStatusText: { flex: 1, ...Type.caption, lineHeight: 16 },
   composer: { flexDirection: "row", alignItems: "flex-end", gap: 10, borderWidth: 1, borderRadius: Radius.lg, padding: 8, marginBottom: 8, marginTop: 4 },
+  micButton: { width: 44, height: 44, borderRadius: Radius.sm, alignItems: "center", justifyContent: "center", borderWidth: 1 },
   input: { flex: 1, minHeight: 42, maxHeight: 112, paddingHorizontal: 10, paddingVertical: 10, fontSize: 15, lineHeight: 20 },
   send: { width: 44, height: 44, borderRadius: Radius.sm, alignItems: "center", justifyContent: "center" },
   emptyCard: { borderWidth: 1, borderRadius: Radius.xl, padding: 28, alignItems: "center", gap: 10 },

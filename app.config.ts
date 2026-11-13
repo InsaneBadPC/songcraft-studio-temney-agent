@@ -108,6 +108,18 @@ const config: ExpoConfig = {
       },
     ],
     [
+      "expo-speech-recognition",
+      {
+        microphonePermission: "Allow $(PRODUCT_NAME) to access your microphone.",
+        speechRecognitionPermission: "Allow $(PRODUCT_NAME) to use speech recognition.",
+        androidSpeechServicePackages: [
+          "com.google.android.googlequicksearchbox",
+          "com.google.android.as",
+          "com.google.android.tts",
+        ],
+      },
+    ],
+    [
       "expo-video",
       {
         supportsBackgroundPlayback: true,
