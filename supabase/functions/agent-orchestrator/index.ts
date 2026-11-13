@@ -346,6 +346,11 @@ const toolDefs = [
         songId: { type: "string" },
         videoId: { type: "string" },
         title: { type: "string" },
+        description: {
+          type: "string",
+          description:
+            "Krátký popis z generate_metadata (2–3 věty). Když chybí, server ho vytvoří sám.",
+        },
         scheduledAt: { type: "string" },
         format: {
           type: "string",
@@ -698,6 +703,43 @@ function textOf(msg: LlmMessage) {
   ).map((part) => part.text).join("\n");
 }
 
+async function describeSongShort(
+  admin: any,
+  userId: string,
+  song: { title: string; lyrics?: string | null; style_prompts?: unknown },
+): Promise<string> {
+  const style = Array.isArray(song.style_prompts)
+    ? song.style_prompts.filter((part): part is string =>
+      typeof part === "string"
+    ).join(", ")
+    : "";
+  const answer = await llm(
+    admin,
+    userId,
+    [
+      "Jsi český textař. Napiš krátký popis vlastní skladby pro YouTube.",
+      "Vrať pouze 2–3 věty, 40–70 slov, česky, max 600 znaků.",
+      "Vycházej jen z názvu, stylu a textu. Řekni, o čem song je a co v něm posluchač uslyší; použij konkrétní obraz z textu.",
+      "Poznámky o produkci v hranatých závorkách (intro, refrén, zpěv, efekty) ignoruj; popisuj příběh, obrazy a náladu, ne produkci.",
+      "Nevymýšlej si fakta, spolupracovníky, odkazy ani čísla. Žádné hashtagy, album, výzvy k odběru ani fráze „Tato skladba je o…“.",
+      "Nepiš nadpis ani uvozovky, vrať jen text popisu.",
+    ].join("\n"),
+    [{
+      role: "user",
+      parts: [{
+        type: "text",
+        text: JSON.stringify({
+          title: song.title,
+          style,
+          lyrics: clip(song.lyrics, 2600),
+        }),
+      }],
+    }],
+    [],
+    false,
+  );
+  return clip(answer.text, 600);
+}
 async function row(
   admin: any,
   table: string,
@@ -1093,10 +1135,11 @@ async function dispatch(
       userId,
       [
         "Jsi Temney, český textař a rapper. Vytvoř YouTube metadata v češtině pro vlastní skladbu.",
-        "Vrať pouze JSON: title (max 100 znaků), description (max 4500 znaků), tags (pole max 15 krátkých tagů).",
-        "Popis piš jako lidský, osobní text 90–140 slov ve 2–4 krátkých odstavcích. Začni konkrétním obrazem, scénou nebo otázkou z textu – ne frází „Tato skladba je o…“.",
-        "Piš v první osobě, přiznaně, střídej krátké a delší věty. Vyhni se klišé („hudba je můj život“, „temnota v srdci“), teleshoppingu a výzvám typu odběr/like/sdílej.",
-        "Zmiň album jen když existuje. Na konec popisu přidej jeden řádek hashtagů. Nevymýšlej si data, spolupracovníky, odkazy ani čísla, která nejsou ve vstupu.",
+        "Vrať pouze JSON: title (max 100 znaků), description (max 600 znaků), tags (pole max 15 krátkých tagů).",
+        "Popis piš jako krátký, lidský text 40–70 slov ve 2–3 větách. Začni konkrétním obrazem, scénou nebo otázkou z textu – ne frází „Tato skladba je o…“.",
+        "Piš v první osobě, přiznaně, střídej krátké a delší věty. Vyhni se klišé („hudba je můj život“, „temnota v srdci“) a teleshoppingu.",
+        "Nepřidávej hashtagy, odkazy, album ani výzvy k odběru – ty doplní publikace sama. Nevymýšlej si data, spolupracovníky ani čísla, která nejsou ve vstupu.",
+        "Poznámky o produkci v hranatých závorkách (intro, refrén, zpěv, efekty) ignoruj; popisuj příběh, obrazy a náladu, ne produkci.",
       ].join("\n"),
       [{
         role: "user",
@@ -1700,10 +1743,21 @@ function pendingOp(op: { id: string; kind: string; summary: string; token: strin
     // Název, popis a tagy skládá jeden sdílený modul, aby publikace z agenta
     // vypadala stejně jako z běžného uživatelského toku. Dřív se ukládal jen
     // název a popis s tagy zůstaly prázdné - video se pak nahrálo "na prázdno".
+    const providedDescription = clip(args.description, 600);
+    let summary = providedDescription;
+    let descriptionSource = summary ? "provided" : "fallback";
+    if (!summary) {
+      summary = await Promise.race([
+        describeSongShort(admin, userId, song),
+        new Promise<string>((resolve) => setTimeout(() => resolve(""), 15_000)),
+      ]).catch(() => "");
+      if (summary) descriptionSource = "llm";
+    }
     const metaInput: YoutubeMetadataInput = {
       title: song.title,
       album: albumName,
       lyrics: song.lyrics ?? null,
+      summary,
       stylePrompts: Array.isArray(song.style_prompts) ? song.style_prompts : [],
       videoKind: wantsShorts ? "shorts" : "video",
     };
@@ -1731,6 +1785,7 @@ function pendingOp(op: { id: string; kind: string; summary: string; token: strin
     await log(admin, userId, name, "success", {
       scheduledAt: suggested,
       videoId: video.id,
+      descriptionSource,
     }, data.id);
     return data;
   }
@@ -1826,7 +1881,7 @@ VIDEO — pravidla, která nesmíš porušit:
 - Render je asynchronní. Neříkej "hotovo", ale "rozjelo se, hlásím se po dokončení", a pak zkontroluj stav (check_video_status).
 - OPERACE NA VM: run_vm_command, push_git_branch, deploy_worker, read_repo_file a read_skills VŽDY vracejí stav pending_confirmation. To znamená, že se NIC NESPUSTÍ, dokud uživatel neřekne ano. Uživateli vždy napiš slovy, CO přesně se má spustit (příkaz, větev, soubory) a počkej na jeho odpověď. Výsledek operace zjistíš přes check_op_status.
 - Nikdy si nevymýšlej, že operace proběhla, dokud check_op_status nevrátí done. Pokud vrátí failed, přečti error_message a řekni uživateli, co se pokazalo.
-- Publikování: nikdy nepublikuj bez výslovného "ok" uživatele. Nejdřív připrav koncept (generate_metadata + schedule_publication jako draft), ukaž uživateli náhled a titulky, a publikuj až když řekne ano. publish_to_youtube vždy vyžaduje potvrzení.`;
+- Publikování: nikdy nepublikuj bez výslovného "ok" uživatele. Nejdřív připrav koncept (generate_metadata + schedule_publication jako draft), ukaž uživateli náhled a titulky, a publikuj až když řekne ano. Popis z generate_metadata předej do schedule_publication v parametru description; publikace sama doplní album, CTA a hashtagy. publish_to_youtube vždy vyžaduje potvrzení.`;
   const contents: LlmMessage[] = [...historyFrom(input ?? {}), {
     role: "user",
     parts: [{ type: "text", text: message }],

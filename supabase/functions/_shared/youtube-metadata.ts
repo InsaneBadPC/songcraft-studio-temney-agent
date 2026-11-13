@@ -7,7 +7,9 @@
  *  - Název: [Interpret] - [Název] ([Žánr / Nálada] | Official ... Video)
  *    Žánrový deskriptor v závorce řekne divákovi i algoritmu, o co jde,
  *    a tím zvyšuje CTR u skladby, kterou zatím nikdo nevyhledává.
- *  - Popis: celý text skladby (indexace přes fulltext) + album + CTA + hashtagy.
+ *  - Popis: krátký lidský souhrn (2–3 věty) + album + CTA + hashtagy.
+ *    Plný text patří do titulků, ne do popisu — dump textu s poznámkami
+ *    o produkci vypadal na YouTube jako surový prompt, ne jako popis písně.
  *  - Tagy: normalizované, max 15, každý max 30 znaků.
  *
  * Vše se čistí: název max 100 znaků, popis max 5000 znaků (limit YouTube).
@@ -19,6 +21,7 @@ export type YoutubeMetadataInput = {
   album?: string | null;
   genre?: string | null;
   lyrics?: string | null;
+  summary?: string | null;
   stylePrompts?: string[] | null;
   videoKind?: "video" | "shorts";
   language?: string | null;
@@ -81,31 +84,37 @@ export function buildYoutubeTitle(input: YoutubeMetadataInput): string {
   return clip(`${artist} - ${title} (${genre} | ${VIDEO_LABEL[kind]})`, 100);
 }
 
-/** Popis: text skladby (indexace) + album + CTA + hashtagy. */
-export function buildYoutubeDescription(input: YoutubeMetadataInput): string {
-  const artist = input.artist?.trim() || DEFAULT_ARTIST;
-  const title = firstLine(input.title);
-  const genre = genreDescriptor(input);
-  const lyrics = (input.lyrics ?? "").trim();
-  const lines: string[] = [];
+/** Krátký souhrn: co v písni divák uslyší. Nikdy nedumpuje celý text. */
+export function buildYoutubeSummary(input: YoutubeMetadataInput): string {
+  const provided = (input.summary ?? "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .replace(/^[„“"«»]+|[„“"«»]+$/g, "")
+    .trim();
+  if (provided) return clip(provided, 600);
 
-  lines.push(`${title} — ${artist}${input.album ? ` | ${input.album}` : ""}`);
-  lines.push("");
-  lines.push(`${artist} — ${genre.toLowerCase()}.`);
-  if (input.album) lines.push(`Album: ${input.album}`);
-  lines.push("");
-  if (lyrics) {
-    lines.push("TEXT:");
-    lines.push(lyrics);
-    lines.push("");
-  }
-  lines.push(`▸ Odběr na YouTube: https://www.youtube.com/@Temney?sub_confirmation=1`);
-  lines.push("");
+  const title = firstLine(input.title);
+  const artist = input.artist?.trim() || DEFAULT_ARTIST;
+  const genre = genreDescriptor(input).toLowerCase();
+  return clip(`„${title}“ je ${genre} od ${artist}.`, 600);
+}
+
+/** Popis: krátký souhrn + album + CTA + hashtagy. Text písně záměrně vynechává. */
+export function buildYoutubeDescription(input: YoutubeMetadataInput): string {
+  const title = firstLine(input.title);
+  const summary = buildYoutubeSummary(input);
+  const album = input.album?.trim();
+  const lines: string[] = [summary];
+
+  if (album) lines.push("", `Album: ${album}`);
   lines.push(
+    "",
+    `▸ Odběr na YouTube: https://www.youtube.com/@Temney?sub_confirmation=1`,
+    "",
     [
       "#Temney",
       `#${slugHashtag(title) || "Song"}`,
-      input.album ? `#${slugHashtag(input.album)}` : "",
+      album ? `#${slugHashtag(album)}` : "",
       "#ceskahudba",
     ].filter(Boolean).join(" "),
   );

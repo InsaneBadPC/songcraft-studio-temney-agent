@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   buildSimpleSrt,
   buildYoutubeDescription,
+  buildYoutubeSummary,
   buildYoutubeTags,
   buildYoutubeTitle,
   genreDescriptor,
@@ -31,17 +32,39 @@ describe("YouTube metadata", () => {
     expect(genreDescriptor({ title: "X", stylePrompts: [] })).toBe("Hip Hop");
   });
 
-  it("dá celý text skladby do popisu (indexace)", () => {
-    const description = buildYoutubeDescription(base);
-    expect(description).toContain("Tma padá na blok.");
-    expect(description).toContain("Z mých plic hustý dým.");
+  it("popis je krátký souhrn, ne dump textu s produkčními poznámkami", () => {
+    const description = buildYoutubeDescription({
+      ...base,
+      summary: "Skladba sleduje člověka, který se v noci vyrovnává s vlastními démony.",
+    });
+    expect(description).toContain("Skladba sleduje člověka");
     expect(description).toContain("Myšlenkovej Boom");
     expect(description).toContain("#Temney");
     expect(description).toContain("#MyslenkovejBoom");
+    expect(description).not.toContain("Tma padá na blok.");
+    expect(description).not.toContain("TEXT:");
+  });
+
+  it("bez souhrnu složí krátký popis z názvu, žánru a alba", () => {
+    const description = buildYoutubeDescription(base);
+    expect(description).toContain("Falešná naděje");
+    expect(description).toContain("je viking hip hop od TEMNEY");
+    expect(description).not.toContain("Tma padá na blok.");
+  });
+
+  it("očistí a zkrátí příliš dlouhý souhrn", () => {
+    const summary = buildYoutubeSummary({ ...base, summary: ` „${"velmi ".repeat(300)}“ ` });
+    expect(summary.length).toBeLessThanOrEqual(600);
+    expect(summary.startsWith("velmi")).toBe(true);
+    expect(summary.endsWith(" „")).toBe(false);
   });
 
   it("drží limit popisu 5000 znaků", () => {
-    const description = buildYoutubeDescription({ ...base, lyrics: "řádek\n".repeat(2000) });
+    const description = buildYoutubeDescription({
+      ...base,
+      summary: "řádek\n".repeat(2000),
+      lyrics: "text\n".repeat(2000),
+    });
     expect(description.length).toBeLessThanOrEqual(5000);
   });
 

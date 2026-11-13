@@ -41,7 +41,9 @@ Algoritmus čte textová data, ne emoci ze zvuku.
   a nech ho automaticky načasovat.
 - YouTube zaindexuje každé slovo → skladba se zobrazuje lidem, kteří hledají
   fráze z textu.
-- **Celý text** dej i do popisku videa.
+- Do popisu dej **krátký lidský souhrn (2–3 věty)** + album + hashtagy.
+  Celý text patří do titulků; surový dump textu s poznámkami o produkci
+  působí jako nehotový prompt a popis znehodnotí.
 
 ## 5. Testování miniatur (A/B)
 
@@ -82,7 +84,7 @@ Legenda: **API** = dá se plně zautomatizovat přes YouTube Data API;
 | 1b. Připnutý komentář s odkazem | **API** | `commentThreads.insert` v `youtube-publish` (externí skript `yt_upload.py` už není potřeba) |
 | 2. Název s žánrovým deskriptorem | **API** | `supabase/functions/_shared/youtube-metadata.ts` → `buildYoutubeTitle` |
 | 3. Dynamický vizuál (lyric/cover video) | hotovo v rendereru | `workers/video-renderer/gallery-engine.mjs` (obálka + pohyb) |
-| 4a. Plný text v popisu | **API** | `_shared/youtube-metadata.ts` → `buildYoutubeDescription` |
+| 4a. Krátký popis + hashtagy | **API** | `_shared/youtube-metadata.ts` → `buildYoutubeDescription`; souhrn z LLM nebo `description` z `generate_metadata` |
 | 4b. Titulky (.srt → captions.insert) | **API** | `_shared/youtube-metadata.ts` → `buildSimpleSrt` + `captions.insert` v `youtube-publish` |
 | 5. A/B miniatury (Test & Compare) | **Studio** | Google A/B API neexistuje; `thumbnails.set` jen nastaví jednu |
 | 5b. Miniatura jako obálka | **API** | `thumbnails.set` v `youtube-publish` |
