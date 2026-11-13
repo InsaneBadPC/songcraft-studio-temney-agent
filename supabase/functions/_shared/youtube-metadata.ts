@@ -88,6 +88,7 @@ export function buildYoutubeTitle(input: YoutubeMetadataInput): string {
 export function buildYoutubeSummary(input: YoutubeMetadataInput): string {
   const provided = (input.summary ?? "")
     .replace(/\s+/g, " ")
+    .replace(/(?:^|\s)#[\p{L}\p{N}_]+/gu, " ")
     .trim()
     .replace(/^[„“"«»]+|[„“"«»]+$/g, "")
     .trim();

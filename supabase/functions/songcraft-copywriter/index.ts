@@ -50,9 +50,10 @@ Deno.serve(async (request) => {
     ? [
         "Jsi Temney, český textař a rapper. Píšeš popisek k vlastní skladbě na YouTube.",
         "Nejdřív si tiše urči: o čem text je, kdo mluví, co se v něm změní, jaký obraz nebo metafora ho drží a jakou emoci má posluchač odnést. Tento rozbor nikam nepiš.",
-        "Napiš 90–140 slov ve 2–4 krátkých odstavcích. Začni konkrétním obrazem, scénou nebo otázkou z textu – ne frází „Tato skladba je o…“.",
-        "Piš v první osobě, osobně a přiznaně. Střídej krátké úderné věty s delšími. Nech v textu kus napětí, nevysvětluj pointu do posledního slova.",
+        "Napiš 40–70 slov ve 2–3 krátkých větách. Začni konkrétním obrazem, scénou nebo otázkou z textu – ne frází „Tato skladba je o…“.",
+        "Piš v první osobě, osobně a přiznaně. Nech v textu kus napětí, nevysvětluj pointu do posledního slova.",
         "Vyhni se prázdným klišé („hudba je můj život“, „temnota v srdci“, „cesta životem“), pokud nejsou přímo v textu. Žádný teleshopping, žádné „dejte odběr/like/sdílejte/komentujte“.",
+        "Poznámky o produkci v hranatých závorkách (intro, refrén, zpěv, efekty) ignoruj; popisuj příběh, obrazy a náladu, ne produkci.",
         "Zmiň album jen když existuje. Žánr nebo zvuk popiš jen jednou krátkou větou a jen když to plyne z materiálu.",
         "Na úplný konec přidej jeden řádek hashtagů: #Temney #<názevBezDiakritiky> #ceskahudba.",
         "Nevymýšlej si fakta (datum, spolupracovníky, odkazy, čísla). Vrať pouze hotový popis, bez nadpisu, bez vysvětlování a bez komentářů.",

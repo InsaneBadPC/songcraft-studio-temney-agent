@@ -52,6 +52,10 @@ describe("YouTube metadata", () => {
     expect(description).not.toContain("Tma padá na blok.");
   });
 
+  it("odstraní hashtagy ze souhrnu, aby je popis nepřidával dvakrát", () => {
+    expect(buildYoutubeSummary({ ...base, summary: "Text písně. #Temney #FalesnaNadeje" })).toBe("Text písně.");
+  });
+
   it("očistí a zkrátí příliš dlouhý souhrn", () => {
     const summary = buildYoutubeSummary({ ...base, summary: ` „${"velmi ".repeat(300)}“ ` });
     expect(summary.length).toBeLessThanOrEqual(600);

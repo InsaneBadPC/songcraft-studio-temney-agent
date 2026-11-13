@@ -1676,7 +1676,7 @@ function pendingOp(op: { id: string; kind: string; summary: string; token: strin
       "sc_songs",
       String(args.songId),
       userId,
-      "id,title,cover_path,album_id,lyrics,style_prompts",
+      "id,title,cover_path,album_id,lyrics,style_prompts,youtube_description",
     );
     const requestedVideoId = clip(args.videoId, 80);
     // 16:9 do playlistu, 9:16 na Shorts. Bez tohoto se vybralo prostě "nejnovější
@@ -1743,7 +1743,8 @@ function pendingOp(op: { id: string; kind: string; summary: string; token: strin
     // Název, popis a tagy skládá jeden sdílený modul, aby publikace z agenta
     // vypadala stejně jako z běžného uživatelského toku. Dřív se ukládal jen
     // název a popis s tagy zůstaly prázdné - video se pak nahrálo "na prázdno".
-    const providedDescription = clip(args.description, 600);
+    const providedDescription = clip(args.description, 600) ||
+      clip(song.youtube_description, 600);
     let summary = providedDescription;
     let descriptionSource = summary ? "provided" : "fallback";
     if (!summary) {
