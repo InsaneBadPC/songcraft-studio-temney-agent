@@ -1,7 +1,7 @@
 import MaterialIcons from "@expo/vector-icons/MaterialIcons";
 import * as Haptics from "expo-haptics";
 import { useEffect, useRef, useState } from "react";
-import { ActivityIndicator, KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import { ActivityIndicator, KeyboardAvoidingView, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { askSongCraftAgent } from "@/lib/agent-api";
@@ -117,7 +117,7 @@ export function WritingAssistant({
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
       <View style={styles.shade}>
         <Pressable accessibilityLabel="Zavřít AI asistenta" style={[StyleSheet.absoluteFill, { backgroundColor: colors.scrim }]} onPress={onClose} />
-        <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : "height"} style={styles.keyboard}>
+        <KeyboardAvoidingView behavior="padding" style={styles.keyboard}>
           <View style={[styles.sheet, { backgroundColor: colors.background, paddingBottom: Math.max(insets.bottom, 14) }]}>
             <View style={[styles.handle, { backgroundColor: colors.border }]} />
             <View style={styles.top}>

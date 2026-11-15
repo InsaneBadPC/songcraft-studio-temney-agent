@@ -23,7 +23,7 @@ export type PickedMedia = {
 };
 
 const IMAGE_PICK = { mediaTypes: ["images"] as ImagePicker.MediaType[], allowsEditing: false, quality: 0.92 };
-const VIDEO_PICK = { mediaTypes: ["videos"] as ImagePicker.MediaType[], allowsEditing: false };
+const VIDEO_PICK = { mediaTypes: ["videos"] as ImagePicker.MediaType[], allowsEditing: false, legacy: Platform.OS === "android" };
 
 function extensionFor(mime: string, fallback: string) {
   if (mime === "image/jpeg") return "jpg";
@@ -47,7 +47,8 @@ async function ensurePermission(): Promise<void> {
 }
 
 async function pick(kind: "images" | "videos"): Promise<PickedMedia | null> {
-  await ensurePermission();
+  const useLegacyAndroidVideoPicker = Platform.OS === "android" && kind === "videos";
+  if (!useLegacyAndroidVideoPicker) await ensurePermission();
   const result = kind === "images"
     ? await ImagePicker.launchImageLibraryAsync(IMAGE_PICK)
     : await ImagePicker.launchImageLibraryAsync(VIDEO_PICK);

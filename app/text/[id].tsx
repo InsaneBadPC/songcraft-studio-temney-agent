@@ -1,7 +1,7 @@
 import MaterialIcons from "@expo/vector-icons/MaterialIcons";
 import { router, useLocalSearchParams } from "expo-router";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Alert, Image, KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { Alert, Image, KeyboardAvoidingView, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 
 import { AlbumChip, Field, IconButton, LoadingState, PrimaryButton, SectionTitle, StatusChip } from "@/components/studio-ui";
 import { ScreenContainer } from "@/components/screen-container";
@@ -45,23 +45,24 @@ export default function TextEditorScreen() {
   const [workspaceMode, setWorkspaceMode] = useState<"lyrics" | "prompt">("lyrics");
   const [draftReady, setDraftReady] = useState(false);
   const draftRunRef = useRef(0);
+  const hydratedKeyRef = useRef<string | null>(null);
   const documentUpdatedAt = document?.updatedAt instanceof Date ? document.updatedAt.getTime() : document?.updatedAt ? new Date(document.updatedAt as unknown as string).getTime() : null;
 
   useEffect(() => {
     const run = ++draftRunRef.current;
-    setDraftReady(false);
     if (!userId) {
+      hydratedKeyRef.current = null;
       setForm(emptyForm);
       resetLyricsHistory("");
       resetPromptHistory("");
+      setDraftReady(true);
       return;
     }
-    if (id && snapshot.isLoading) {
-      setForm(emptyForm);
-      resetLyricsHistory("");
-      resetPromptHistory("");
-      return;
-    }
+    if (id && snapshot.isLoading && !document) return;
+    const hydrationKey = `${userId}|${id ?? "new"}|${documentUpdatedAt ?? "none"}`;
+    if (hydratedKeyRef.current === hydrationKey) return;
+    hydratedKeyRef.current = hydrationKey;
+    setDraftReady(false);
 
     const serverForm: EditorForm = document ? {
       title: document.title,
@@ -90,14 +91,13 @@ export default function TextEditorScreen() {
     });
 
     return () => { cancelled = true; };
-    // Server fields are listed individually so a new cache object does not wipe an unsaved form.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [document?.albumId, document?.coverStorageKey, document?.coverUrl, document?.id, document?.lyrics, document?.notes, document?.stylePrompt, document?.title, documentUpdatedAt, id, resetLyricsHistory, resetPromptHistory, snapshot.isLoading, userId]);
+  }, [documentUpdatedAt, id, snapshot.isLoading, userId]);
 
   useDraftStorage(form, id, userId, draftReady, "text");
-  if (isAuthenticated && userId && !draftReady && (!id || document)) return <ScreenContainer><LoadingState /></ScreenContainer>;
-  if (id && snapshot.isLoading) return <ScreenContainer><LoadingState /></ScreenContainer>;
-  if (id && document?.status === "complete") {
+  if (!workspaceOpen && isAuthenticated && userId && !draftReady && (!id || document)) return <ScreenContainer><LoadingState /></ScreenContainer>;
+  if (!workspaceOpen && id && snapshot.isLoading) return <ScreenContainer><LoadingState /></ScreenContainer>;
+  if (!workspaceOpen && id && document?.status === "complete") {
     if (linkedSong) { router.replace(`/song/${linkedSong.id}` as never); return <ScreenContainer><LoadingState /></ScreenContainer>; }
     return <ScreenContainer className="p-5 justify-center"><View style={[styles.completeBox, { backgroundColor: `${colors.success}16`, borderColor: `${colors.success}55` }]}><MaterialIcons name="check-circle" size={23} color={colors.success} /><View style={styles.completeCopy}><Text style={[styles.completeTitle, { color: colors.foreground }]}>Hotový text je v Knihovně</Text><Text style={[styles.completeText, { color: colors.muted }]}>Tento koncept už byl dokončen a patří do Knihovny.</Text></View></View><PrimaryButton label="Otevřít Knihovnu" icon="library-music" onPress={() => router.replace("/(tabs)/library" as never)} /></ScreenContainer>;
   }
@@ -186,7 +186,7 @@ export default function TextEditorScreen() {
       />
     );
   }
-  return <ScreenContainer edges={["top", "bottom", "left", "right"]}><KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : "height"} keyboardVerticalOffset={0} style={{ flex: 1 }}><ScrollView contentContainerStyle={[styles.content, { paddingBottom: 180 }]} keyboardShouldPersistTaps="handled" keyboardDismissMode="interactive" automaticallyAdjustKeyboardInsets><View style={styles.topbar}><IconButton label="Zpět" icon="arrow-back" onPress={() => router.back()} /><View style={styles.topbarTitle}><Text numberOfLines={1} style={[styles.topbarName, { color: colors.foreground }]}>{id ? "Editor textu" : "Nový text"}</Text>{document ? <StatusChip state={document.status} /> : null}</View><Pressable onPress={() => void save()} style={({ pressed }) => [styles.save, { opacity: saving || pressed ? 0.6 : 1 }]}><Text style={[styles.saveText, { color: colors.primary }]}>{saving ? "Ukládám" : "Uložit"}</Text></Pressable></View>
+  return <ScreenContainer edges={["top", "bottom", "left", "right"]}><KeyboardAvoidingView behavior="padding" keyboardVerticalOffset={0} style={{ flex: 1 }}><ScrollView contentContainerStyle={[styles.content, { paddingBottom: 180 }]} keyboardShouldPersistTaps="handled" keyboardDismissMode="interactive" automaticallyAdjustKeyboardInsets><View style={styles.topbar}><IconButton label="Zpět" icon="arrow-back" onPress={() => router.back()} /><View style={styles.topbarTitle}><Text numberOfLines={1} style={[styles.topbarName, { color: colors.foreground }]}>{id ? "Editor textu" : "Nový text"}</Text>{document ? <StatusChip state={document.status} /> : null}</View><Pressable onPress={() => void save()} style={({ pressed }) => [styles.save, { opacity: saving || pressed ? 0.6 : 1 }]}><Text style={[styles.saveText, { color: colors.primary }]}>{saving ? "Ukládám" : "Uložit"}</Text></Pressable></View>
     <View style={styles.coverBlock}>
     <Pressable onPress={() => void uploadCover()} style={({ pressed }) => [styles.cover, { borderColor: colors.border, backgroundColor: colors.surface, opacity: pressed ? 0.72 : 1 }]}>{form.coverUrl ? <Image source={{ uri: form.coverUrl }} style={styles.coverImage} resizeMode="contain" /> : <><View style={[styles.coverIcon, { backgroundColor: `${colors.primary}20` }]}><MaterialIcons name="add-photo-alternate" size={25} color={colors.primary} /></View><Text style={[styles.coverTitle, { color: colors.foreground }]}>Přidat přebal skladby</Text><Text style={[styles.coverText, { color: colors.muted }]}>Použiješ ho v katalogu i při přípravě obrázku pro YouTube.</Text></>}</Pressable>
     <Pressable onPress={() => void generateCover()} disabled={coverGenerating} style={({ pressed }) => [styles.generateCover, { borderColor: colors.primary, backgroundColor: `${colors.primary}12`, opacity: coverGenerating || pressed ? 0.62 : 1 }]}><MaterialIcons name={coverGenerating ? "hourglass-top" : "auto-awesome"} size={19} color={colors.primary} /><View style={styles.generateCopy}><Text style={[styles.generateTitle, { color: colors.primary }]}>{coverGenerating ? "Bezplatná AI vytváří 16:9 obal…" : "Vygenerovat obrázek skladby 16:9"}</Text><Text style={[styles.generateText, { color: colors.muted }]}>{id ? "Vytvoří široký obal z názvu, stylu a textu — ideální pro YouTube." : "Nejdřív text ulož, pak můžeš vytvořit obal."}</Text></View></Pressable>

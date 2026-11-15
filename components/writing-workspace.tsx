@@ -185,7 +185,7 @@ export function WritingWorkspace({
 
   return (
     <ScreenContainer edges={["top", "bottom", "left", "right"]}>
-        <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : "height"} style={styles.keyboard}>
+        <KeyboardAvoidingView behavior="padding" style={styles.keyboard}>
           <View style={styles.content}>
             <View style={styles.topbar}>
               <IconButton icon="close" label="Zavřít editor" onPress={onClose} />
