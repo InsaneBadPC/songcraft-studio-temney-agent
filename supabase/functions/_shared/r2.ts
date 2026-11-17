@@ -49,6 +49,16 @@ export function parseR2Path(value: unknown): { bucket: string; key: string } | n
   return { bucket: rest.slice(0, slash), key: rest.slice(slash + 1) };
 }
 
+export function mediaKey(value: unknown): string | null {
+  const parsed = parseR2Path(value);
+  if (parsed) {
+    if (parsed.bucket !== "songcraft-studio" || parsed.key.includes("..") || parsed.key.includes("\\") || parsed.key.startsWith("/") || parsed.key.includes("//")) return null;
+    return parsed.key;
+  }
+  if (typeof value !== "string" || !value || value.startsWith("/") || value.includes("\\") || value.includes("..") || value.includes("//")) return null;
+  return value;
+}
+
 export type R2Client = {
   endpoint: string;
   bucket: string;

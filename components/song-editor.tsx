@@ -140,6 +140,7 @@ export function SongEditor({ songId }: { songId?: string }) {
           fileName: picked.fileName,
           contentType: picked.mimeType,
           bytes: picked.bytes,
+          sourceUri: picked.uri,
         });
         await addMedia.mutateAsync({
           songId,
@@ -217,6 +218,7 @@ export function SongEditor({ songId }: { songId?: string }) {
         fileName: picked.fileName,
         contentType: picked.mimeType,
         bytes: picked.bytes,
+        sourceUri: picked.uri,
       });
       setForm((current) => ({ ...current, coverStorageKey: uploaded.key, coverUrl: uploaded.url }));
     } catch (error) {
@@ -232,6 +234,7 @@ export function SongEditor({ songId }: { songId?: string }) {
         fileName: picked.fileName,
         contentType: picked.mimeType,
         bytes: picked.bytes,
+        sourceUri: picked.uri,
       });
       setForm((current) => ({ ...current, sourceVideoStorageKey: uploaded.key }));
       Alert.alert("Video je nahrané", "Render z něj udělá smyčku přes celou skladbu.");

@@ -1,6 +1,8 @@
 import { supabase } from "@/lib/supabase";
 import { getPlayableAudioUrl } from "@/lib/audio-source";
-import { assertOwnedStoragePath, buildOwnedStoragePath, validateStorageUpload } from "@/lib/storage-paths";
+import { signMediaPaths } from "@/lib/media-url";
+import { uploadMedia } from "@/lib/media-upload";
+import { assertOwnedStoragePath } from "@/lib/storage-paths";
 import { checkVideoModeReadiness } from "@/lib/video-modes";
 
 export type StudioAlbum = {
@@ -84,14 +86,16 @@ export type StudioVersion = {
 };
 
 export type StudioRhymeWord = { id: string; userId: string; word: string; createdAt: Date };
-export type StudioSnapshot = { albums: StudioAlbum[]; documents: StudioDocument[]; songs: StudioSong[]; versions: StudioVersion[]; rhymeWords: StudioRhymeWord[]; stylePrompts: StudioStylePrompt[] };
+export type StudioSnapshot = { albums: StudioAlbum[]; documents: StudioDocument[]; songs: StudioSong[]; versions: StudioVersion[]; rhymeWords: StudioRhymeWord[]; stylePrompts: StudioStylePrompt[]; fetchedAt: number };
 
 type SessionUser = { id: string };
 const mapTime = (value: string | null | undefined) => (value ? new Date(value) : null);
 // Delší platnost znamená, že otevřená knihovna nepřijde o obrázky po hodině.
 // Snapshot se navíc obnovuje při návratu do aplikace a průběžně během dne.
-const SIGNED_URL_TTL_SECONDS = 60 * 60 * 24;
-const signedUrl = async (storagePath: string | null, userId: string) => {
+// Signed URL se ale NEVYTÁŘÍ na každý řádek - celý balík se podepíše
+// jedním requestem (sign_batch). Dřív to bylo ~150 createSignedUrl requestů
+// na jeden snapshot, což samo o sobě vyčerpalo kvótu API requestů.
+const signedUrl = async (storagePath: string | null, userId: string, urls: Record<string, string>) => {
   if (!storagePath) return null;
   try {
     assertOwnedStoragePath(userId, storagePath);
@@ -99,10 +103,7 @@ const signedUrl = async (storagePath: string | null, userId: string) => {
     // A malformed legacy row must not become a cross-tenant signed URL.
     return null;
   }
-  const { data, error } = await supabase.storage.from("songcraft").createSignedUrl(storagePath, SIGNED_URL_TTL_SECONDS);
-  // Jedna poškozená nebo již neexistující příloha nesmí zablokovat celý katalog.
-  if (error || !data?.signedUrl) return null;
-  return data.signedUrl;
+  return urls[storagePath] ?? null;
 };
 const owner = async (): Promise<SessionUser> => {
   const { data, error } = await supabase.auth.getUser();
@@ -118,12 +119,12 @@ const assert = <T>(data: T | null, error: { message: string } | null): T => {
   return data;
 };
 
-const albumFromRow = async (row: any): Promise<StudioAlbum> => ({ id: row.id, userId: row.user_id, name: row.name, description: row.description, releaseYear: row.release_year, coverStorageKey: row.cover_path, coverUrl: await signedUrl(row.cover_path, row.user_id), sortOrder: row.sort_order, createdAt: new Date(row.created_at), updatedAt: new Date(row.updated_at) });
-const documentFromRow = async (row: any): Promise<StudioDocument> => ({ id: row.id, userId: row.user_id, albumId: row.album_id, title: row.title, stylePrompt: row.style_prompt, lyrics: row.lyrics, notes: row.notes, coverStorageKey: row.cover_path, coverUrl: await signedUrl(row.cover_path, row.user_id), status: row.status === "complete" ? "complete" : "draft", completedAt: mapTime(row.completed_at), createdAt: new Date(row.created_at), updatedAt: new Date(row.updated_at) });
-const songFromRow = async (row: any, fallbackCoverPath: string | null = null): Promise<StudioSong> => ({ id: row.id, userId: row.user_id, albumId: row.album_id, sourceDocumentId: row.source_lyric_id, title: row.title, stylePrompt: row.style_prompt, stylePrompts: songStylePrompts(row), lyrics: row.lyrics, notes: row.notes, coverStorageKey: row.cover_path, coverUrl: await signedUrl(row.cover_path ?? fallbackCoverPath, row.user_id), sourceVideoStorageKey: row.source_video_path ?? null, youtubeDescription: row.youtube_description ?? null, youtubeTags: row.youtube_tags ?? null, isPublished: Boolean(row.is_published), publishedAt: mapTime(row.published_at), publishedVideoId: row.published_video_id ?? null, completedAt: new Date(row.completed_at), createdAt: new Date(row.created_at), updatedAt: new Date(row.updated_at) });
-const versionFromRow = async (row: any): Promise<StudioVersion> => {
-  const storageUrl = await signedUrl(row.storage_path, row.user_id);
-  const taggedStorageUrl = await signedUrl(row.tagged_storage_path, row.user_id);
+const albumFromRow = async (row: any, urls: Record<string, string>): Promise<StudioAlbum> => ({ id: row.id, userId: row.user_id, name: row.name, description: row.description, releaseYear: row.release_year, coverStorageKey: row.cover_path, coverUrl: await signedUrl(row.cover_path, row.user_id, urls), sortOrder: row.sort_order, createdAt: new Date(row.created_at), updatedAt: new Date(row.updated_at) });
+const documentFromRow = async (row: any, urls: Record<string, string>): Promise<StudioDocument> => ({ id: row.id, userId: row.user_id, albumId: row.album_id, title: row.title, stylePrompt: row.style_prompt, lyrics: row.lyrics, notes: row.notes, coverStorageKey: row.cover_path, coverUrl: await signedUrl(row.cover_path, row.user_id, urls), status: row.status === "complete" ? "complete" : "draft", completedAt: mapTime(row.completed_at), createdAt: new Date(row.created_at), updatedAt: new Date(row.updated_at) });
+const songFromRow = async (row: any, urls: Record<string, string>, fallbackCoverPath: string | null = null): Promise<StudioSong> => ({ id: row.id, userId: row.user_id, albumId: row.album_id, sourceDocumentId: row.source_lyric_id, title: row.title, stylePrompt: row.style_prompt, stylePrompts: songStylePrompts(row), lyrics: row.lyrics, notes: row.notes, coverStorageKey: row.cover_path, coverUrl: await signedUrl(row.cover_path ?? fallbackCoverPath, row.user_id, urls), sourceVideoStorageKey: row.source_video_path ?? null, youtubeDescription: row.youtube_description ?? null, youtubeTags: row.youtube_tags ?? null, isPublished: Boolean(row.is_published), publishedAt: mapTime(row.published_at), publishedVideoId: row.published_video_id ?? null, completedAt: new Date(row.completed_at), createdAt: new Date(row.created_at), updatedAt: new Date(row.updated_at) });
+const versionFromRow = async (row: any, urls: Record<string, string>): Promise<StudioVersion> => {
+  const storageUrl = await signedUrl(row.storage_path, row.user_id, urls);
+  const taggedStorageUrl = await signedUrl(row.tagged_storage_path, row.user_id, urls);
   return { id: row.id, userId: row.user_id, songId: row.song_id, label: row.label, originalFileName: row.original_file_name, storageKey: row.storage_path, storageUrl: getPlayableAudioUrl(storageUrl) ?? "", mimeType: row.mime_type, byteSize: row.byte_size, rating: row.rating, isPrimary: row.is_primary, isFinal: row.is_final, id3Title: row.id3_title, id3Artist: row.id3_artist, id3Album: row.id3_album, id3TrackNumber: row.id3_track_number, id3Year: row.id3_year, id3Genre: row.id3_genre, id3Comment: row.id3_comment, taggedStorageKey: row.tagged_storage_path, taggedStorageUrl: getPlayableAudioUrl(taggedStorageUrl), createdAt: new Date(row.created_at), updatedAt: new Date(row.updated_at) };
 };
 const rhymeFromRow = (row: any): StudioRhymeWord => ({ id: row.id, userId: row.user_id, word: row.word, createdAt: new Date(row.created_at) });
@@ -133,38 +134,80 @@ const songStylePrompts = (row: any): string[] => {
   if (list.length) return list;
   return row.style_prompt?.trim() ? [row.style_prompt] : [];
 };
+/**
+ * Snapshot studia: JEDEN RPC dotaz + JEDEN dávkový podpis.
+ *
+ * Dřív to bylo 7 PostgREST dotazů + ~150 createSignedUrl requestů = ~160
+ * API requestů na jedno načtení obrazovky. Při návratu do appky se to
+ * opakovalo a měsíční kvóta 500 000 requestů byla pryč.
+ */
 export async function getExternalStudioSnapshot(): Promise<StudioSnapshot> {
   const user = await owner();
-  const [albums, documents, songs, versions, rhymeWords, stylePrompts, mediaImages] = await Promise.all([
-    supabase.from("sc_albums").select("*").eq("user_id", user.id).order("sort_order").order("name"),
-    supabase.from("sc_lyrics").select("*").eq("user_id", user.id).order("updated_at", { ascending: false }),
-    supabase.from("sc_songs").select("*").eq("user_id", user.id).order("completed_at", { ascending: false }),
-    supabase.from("sc_audio_versions").select("*").eq("user_id", user.id).order("is_final", { ascending: false }).order("is_primary", { ascending: false }).order("rating", { ascending: false }),
-    supabase.from("sc_rhyme_words").select("*").eq("user_id", user.id).order("word"),
-    supabase.from("sc_style_prompts").select("*").eq("user_id", user.id).order("rating", { ascending: false }).order("updated_at", { ascending: false }),
-    supabase.from("sc_song_media").select("song_id,storage_path").eq("user_id", user.id).eq("kind", "image").order("sort_order").order("created_at"),
-  ]);
+
+  const { data, error } = await supabase.rpc("sc_studio_snapshot", { p_user_id: user.id });
+  if (error || !data) throw new Error(error?.message || "Externí cloud nevrátil snapshot studia.");
+  const payload = data as {
+    albums?: any[];
+    documents?: any[];
+    songs?: any[];
+    versions?: any[];
+    rhymeWords?: any[];
+    stylePrompts?: any[];
+    mediaImages?: { song_id: string; storage_path: string }[];
+  };
+
   // Nahraný obrázek v "Doprovodná média" má přednost před prázdným coverem.
   // Bere se jen první obrázek na píseň a jen jako zobrazení; cover_path se
   // nepřepisuje, aby smazání média neposlalo katalog na neexistující soubor.
-  // Doprovodná média jsou jen doplněk. Když jejich dotaz selže, katalog
-  // s vlastními cover_path musí zůstat funkční.
+  // Doprovodná média jsou jen doplněk. Když jejich dotaz selže, katalog s
+  // vlastními cover_path musí zůstat funkční.
   const fallbackCovers = new Map<string, string>();
-  for (const row of mediaImages.error ? [] : (mediaImages.data ?? [])) {
+  for (const row of payload.mediaImages ?? []) {
     if (!fallbackCovers.has(row.song_id)) fallbackCovers.set(row.song_id, row.storage_path);
   }
+
+  const albums = payload.albums ?? [];
+  const documents = payload.documents ?? [];
+  const songs = payload.songs ?? [];
+  const versions = payload.versions ?? [];
+
+  // Všechny cesty, které potřebují podepsanou URL, se podepíšou najednou.
+  const paths = [
+    ...albums.map((row) => row.cover_path),
+    ...documents.map((row) => row.cover_path),
+    ...songs.map((row) => row.cover_path ?? fallbackCovers.get(row.id) ?? null),
+    ...versions.map((row) => row.storage_path),
+    ...versions.map((row) => row.tagged_storage_path),
+  ];
+  const urls = await signMediaPaths(paths);
+
   return {
-    albums: await Promise.all(assert(albums.data, albums.error).map(albumFromRow)),
-    documents: await Promise.all(assert(documents.data, documents.error).map(documentFromRow)),
-    songs: await Promise.all(assert(songs.data, songs.error).map((row) => songFromRow(row, fallbackCovers.get(row.id) ?? null))),
-    versions: await Promise.all(assert(versions.data, versions.error).map(versionFromRow)),
-    rhymeWords: assert(rhymeWords.data, rhymeWords.error).map(rhymeFromRow),
-    stylePrompts: assert(stylePrompts.data, stylePrompts.error).map(stylePromptFromRow),
+    albums: await Promise.all(albums.map((row) => albumFromRow(row, urls))),
+    documents: await Promise.all(documents.map((row) => documentFromRow(row, urls))),
+    songs: await Promise.all(songs.map((row) => songFromRow(row, urls, fallbackCovers.get(row.id) ?? null))),
+    versions: await Promise.all(versions.map((row) => versionFromRow(row, urls))),
+    rhymeWords: (payload.rhymeWords ?? []).map(rhymeFromRow),
+    stylePrompts: (payload.stylePrompts ?? []).map(stylePromptFromRow),
+    fetchedAt: Date.now(),
   };
 }
 
-export async function uploadToExternalStorage(input: { folder: "covers" | "audio" | "videos"; fileName: string; contentType: string; base64?: string; bytes?: ArrayBuffer }) {
-  const user = await owner();
+/**
+ * Nahrání souboru do media store (Cloudflare R2).
+ *
+ * Dřív: prímo do Supabase Storage (1 GB kvóta -> projekt se odstavil).
+ * Teď: edge funkce vystaví podepsanou PUT URL, soubor jde PŘÍMO do R2 a
+ * katalog doplní registrace. Rozpočet uživatele se kontroluje předem.
+ */
+export async function uploadToExternalStorage(input: {
+  folder: "covers" | "audio" | "videos" | "media";
+  fileName: string;
+  contentType: string;
+  base64?: string | null;
+  bytes?: ArrayBuffer;
+  sourceUri?: string | null;
+}) {
+  await owner();
   const bytes = input.bytes
     ? new Uint8Array(input.bytes)
     : input.base64
@@ -177,11 +220,14 @@ export async function uploadToExternalStorage(input: { folder: "covers" | "audio
         })()
       : null;
   if (!bytes) throw new Error("Chybí data souboru pro nahrání.");
-  const validated = validateStorageUpload({ folder: input.folder, contentType: input.contentType, fileName: input.fileName, bytes });
-  const path = buildOwnedStoragePath(user.id, input.folder, validated.fileName);
-  const { error } = await supabase.storage.from("songcraft").upload(path, bytes, { contentType: validated.mimeType, upsert: false });
-  if (error) throw new Error(error.message);
-  return { key: path, url: (await signedUrl(path, user.id)) || "", byteSize: bytes.byteLength, originalFileName: validated.fileName, mimeType: validated.mimeType };
+  return uploadMedia({
+    folder: input.folder,
+    fileName: input.fileName,
+    contentType: input.contentType,
+    bytes: bytes.buffer as ArrayBuffer,
+    base64: input.base64 ?? null,
+    sourceUri: input.sourceUri ?? null,
+  });
 }
 
 export type YoutubeChannelStatus = {
@@ -293,7 +339,8 @@ export async function exportExternalTaggedCopy(versionId: string) {
   const version = assert(data, error);
   const result = await callExternalMediaFunction(version.id, version.label, version.id3_comment);
   assertOwnedStoragePath(user.id, result.path);
-  return { url: (await signedUrl(result.path, user.id)) || "", fileName: result.fileName };
+  const urls = await signMediaPaths([result.path]);
+  return { url: urls[result.path] || "", fileName: result.fileName };
 }
 
 export type ExternalCoverGeneration =
@@ -606,20 +653,20 @@ export async function listExternalSongMedia(songId: string): Promise<SongMediaIt
     .order("sort_order", { ascending: true })
     .order("created_at", { ascending: true });
   const rows = assert(data ?? [], error as never);
-  return Promise.all(
-    rows.map(async (row: any) => ({
-      id: row.id as string,
-      songId: row.song_id as string,
-      kind: (row.kind as SongMediaKind) ?? "image",
-      storageKey: row.storage_path as string,
-      url: await signedUrl(row.storage_path, user.id),
-      originalFileName: (row.original_file_name as string) ?? null,
-      mimeType: (row.mime_type as string) ?? null,
-      byteSize: Number(row.byte_size ?? 0),
-      sortOrder: Number(row.sort_order ?? 0),
-      sceneMs: Number(row.scene_ms ?? 0),
-    })),
-  );
+  // Podepsání celé galerie najednou - dřív jeden request na každý obrázek.
+  const urls = await signMediaPaths(rows.map((row: any) => row.storage_path));
+  return rows.map((row: any) => ({
+    id: row.id as string,
+    songId: row.song_id as string,
+    kind: (row.kind as SongMediaKind) ?? "image",
+    storageKey: row.storage_path as string,
+    url: urls[row.storage_path] ?? null,
+    originalFileName: (row.original_file_name as string) ?? null,
+    mimeType: (row.mime_type as string) ?? null,
+    byteSize: Number(row.byte_size ?? 0),
+    sortOrder: Number(row.sort_order ?? 0),
+    sceneMs: Number(row.scene_ms ?? 0),
+  }));
 }
 
 export async function addExternalSongMedia(input: {

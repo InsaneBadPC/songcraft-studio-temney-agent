@@ -1,6 +1,12 @@
 import { defineConfig } from "vitest/config";
+import { fileURLToPath } from "node:url";
 
 export default defineConfig({
+  resolve: {
+    alias: {
+      "@": fileURLToPath(new URL(".", import.meta.url).href),
+    },
+  },
   test: {
     // Live credentials and provider calls are opt-in, never part of the
     // hermetic pull-request gate.

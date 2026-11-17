@@ -119,7 +119,7 @@ export default function TextEditorScreen() {
     try {
       const picked = await pickImage();
       if (!picked) return;
-      const uploaded = await upload.mutateAsync({ folder: "covers", fileName: picked.fileName, contentType: picked.mimeType, bytes: picked.bytes });
+      const uploaded = await upload.mutateAsync({ folder: "covers", fileName: picked.fileName, contentType: picked.mimeType, bytes: picked.bytes, sourceUri: picked.uri });
       setForm((current) => ({ ...current, coverStorageKey: uploaded.key, coverUrl: uploaded.url }));
     } catch (error) { Alert.alert("Přebal se nepodařilo nahrát", error instanceof Error ? error.message : "Zkus jiný obrázek."); }
   };

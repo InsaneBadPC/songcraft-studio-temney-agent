@@ -54,7 +54,6 @@ const ACTIONS = [
 ] as const;
 type Action = (typeof ACTIONS)[number];
 
-const BACKUP_BUCKET = "songcraft-backups";
 const NONCE_TTL_MS = 15 * 60 * 1000;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -175,10 +174,10 @@ Deno.serve(async (request) => {
       }
     }
 
-    const { data: objects } = await admin.storage.from("songcraft").list("", { limit: 1000 });
+    const { data: objects } = await admin.from("sc_media_objects").select("user_id").eq("state", "active").limit(1000);
     const filesByUser = new Map<string, number>();
     for (const entry of objects ?? []) {
-      const owner = entry.name.split("/")[0];
+      const owner = String(entry.user_id);
       filesByUser.set(owner, (filesByUser.get(owner) ?? 0) + 1);
     }
 
@@ -457,8 +456,8 @@ Deno.serve(async (request) => {
             entry.downloadUrl = await r2.presign("GET", `${r2Path.key}.part-0001`, 3600);
           }
         } else {
-          const signed = await admin.storage.from(BACKUP_BUCKET).createSignedUrl(job.archive_path, 3600, { download: true });
-          entry.downloadUrl = signed.data?.signedUrl ?? null;
+          entry.archive_storage = "legacy";
+          entry.downloadUrl = null;
         }
       }
       withUrls.push(entry);

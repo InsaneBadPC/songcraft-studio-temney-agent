@@ -4,6 +4,7 @@ import JSZip from "npm:jszip";
 import mammoth from "npm:mammoth";
 import { Buffer } from "node:buffer";
 import { isAllowedPrivateUser, privateAccessMessage } from "../_shared/access.ts";
+import { createR2Client, mediaKey } from "../_shared/r2.ts";
 
 const cors = { "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type", "Access-Control-Allow-Methods": "POST, OPTIONS" };
 const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { ...cors, "Content-Type": "application/json" } });
@@ -12,7 +13,10 @@ const safe = (name: string) => name.replace(/[^a-zA-Z0-9._-]/g, "_").slice(-180)
 const MAX_ARCHIVE_BYTES = 300 * 1024 * 1024;
 const MAX_LIBRARY_ITEMS = 5_000;
 const MAX_STORED_FILE_BYTES = 50 * 1024 * 1024;
-const ownedPath = (userId: string, value: unknown) => typeof value === "string" && value.length <= 1024 && !value.includes("\\") && !value.includes("..") && value.startsWith(`${userId}/`) ? value : null;
+const ownedPath = (userId: string, value: unknown) => {
+  const key = mediaKey(value);
+  return key && key.length <= 1024 && (key === userId || key.startsWith(`${userId}/`)) ? key : null;
+};
 const ext = (path: string | null | undefined, fallback: string) => { const candidate = path?.split(".").pop()?.replace(/[^a-zA-Z0-9]/g, ""); return candidate ? `.${candidate}` : fallback; };
 const sections: Record<string, string> = { verse: "Sloka", sloka: "Sloka", chorus: "Refrén", refrain: "Refrén", "refrén": "Refrén", refren: "Refrén", bridge: "Bridge", intro: "Intro", outro: "Outro", "pre-chorus": "Pre-refrén", "pre-refrén": "Pre-refrén", interlude: "Mezihra", mezihra: "Mezihra", hook: "Hook" };
 const annotate = (content: string) => content.replace(/\r\n?/g, "\n").split("\n").map((line) => { const match = line.trim().match(/^\[?\s*(verse|sloka|chorus|refrain|refr[ée]n|bridge|intro|outro|pre-chorus|pre-refr[ée]n|interlude|mezihra|hook)\s*(\d+)?\s*\]?[:\-]?\s*$/i); if (!match) return line; const key = match[1].toLocaleLowerCase("cs-CZ"); return `[${sections[key] ?? match[1]}${match[2] ? ` ${match[2]}` : ""}]`; }).join("\n").replace(/\n{3,}/g, "\n\n").trim();
@@ -83,13 +87,19 @@ Deno.serve(async (request) => {
     const title = selectedAlbum ? `Album ${selectedAlbum.name}` : "Kompletní knihovna";
     zip.file("SongCraft-Studio-export.json", JSON.stringify({ exportedAt: createdAt, artist: "Temney", exportTitle: title, albums, lyrics, songs, versions }, null, 2));
     zip.file("README.txt", `SongCraft Studio — ${title}\n\nTexty obsahují prompt pro styl, samotný text a poznámky. Skladby obsahují MP3 verze s upravenými ID3 tagy, obrázky a metadata.\n`);
+    const r2 = createR2Client();
     const addStored = async (storagePath: string | null | undefined, target: string) => {
-      const path = ownedPath(user.id, storagePath);
-      if (!path) return;
-      const { data } = await supabase.storage.from("songcraft").download(path);
-      if (!data) return;
-      if (data.size <= 0 || data.size > MAX_STORED_FILE_BYTES) throw new Error("Soubor v exportu překračuje limit.");
-      zip.file(target, new Uint8Array(await data.arrayBuffer()));
+      const key = ownedPath(user.id, storagePath);
+      if (!key) return;
+      let response: Response;
+      try {
+        response = await r2.getObject(key, 15 * 60);
+      } catch {
+        return;
+      }
+      const bytes = new Uint8Array(await response.arrayBuffer());
+      if (bytes.byteLength <= 0 || bytes.byteLength > MAX_STORED_FILE_BYTES) throw new Error("Soubor v exportu překračuje limit.");
+      zip.file(target, bytes);
     };
     for (const album of albums) await addStored(album.cover_path, `Alba/${safe(album.name)}-${album.id}/obal${ext(album.cover_path, ".jpg")}`);
     for (const lyric of lyrics) { const folder = `Texty/${safe(lyric.title)}-${lyric.id}`; zip.file(`${folder}/text-pisne.txt`, lyric.lyrics ?? ""); zip.file(`${folder}/prompt-stylu.txt`, lyric.style_prompt ?? ""); zip.file(`${folder}/poznamky.txt`, lyric.notes ?? ""); zip.file(`${folder}/metadata.json`, JSON.stringify(lyric, null, 2)); await addStored(lyric.cover_path, `${folder}/obrazek${ext(lyric.cover_path, ".jpg")}`); }
@@ -97,11 +107,10 @@ Deno.serve(async (request) => {
     const archive = await zip.generateAsync({ type: "uint8array", compression: "DEFLATE", compressionOptions: { level: 6 } });
     if (archive.byteLength <= 0 || archive.byteLength > MAX_ARCHIVE_BYTES) return json({ error: "Export překročil limit 300 MB. Exportuj menší album." }, 413);
     const fileName = selectedAlbum ? `SongCraft-Studio-album-${safe(selectedAlbum.name)}-${createdAt.slice(0, 10)}.zip` : `SongCraft-Studio-kompletni-knihovna-${createdAt.slice(0, 10)}.zip`;
-    const path = `${user.id}/exports/${fileName}`;
-    const { error: uploadError } = await supabase.storage.from("songcraft").upload(path, archive, { contentType: "application/zip", upsert: true });
-    if (uploadError) return json({ error: uploadError.message }, 400);
-    const { data: signed, error: signError } = await supabase.storage.from("songcraft").createSignedUrl(path, 60 * 30);
-    return signError ? json({ error: signError.message }, 400) : json({ url: signed.signedUrl, fileName, byteSize: archive.byteLength });
+    const key = `${user.id}/exports/${fileName}`;
+    await r2.putObject(key, archive, "application/zip", 15 * 60);
+    const url = await r2.presign("GET", key, 60 * 30);
+    return json({ url, fileName, byteSize: archive.byteLength });
   }
 
   if (input.action === "export_lyrics_txt") {
@@ -155,11 +164,11 @@ Deno.serve(async (request) => {
     const content = `\ufeff${parts.join("\n")}`;
     if (content.length > 20 * 1024 * 1024) return json({ error: "Textový export je příliš velký." }, 413);
     const fileName = `Temney-seznam-skladeb-${new Date().toISOString().slice(0, 10)}.txt`;
-    const path = `${user.id}/exports/${fileName}`;
-    const { error: uploadError } = await supabase.storage.from("songcraft").upload(path, new TextEncoder().encode(content), { contentType: "text/plain; charset=utf-8", upsert: true });
-    if (uploadError) return json({ error: uploadError.message }, 400);
-    const { data: signed, error: signError } = await supabase.storage.from("songcraft").createSignedUrl(path, 60 * 30);
-    return signError ? json({ error: signError.message }, 400) : json({ url: signed.signedUrl, fileName, byteSize: content.length });
+    const key = `${user.id}/exports/${fileName}`;
+    const exportR2 = createR2Client();
+    await exportR2.putObject(key, new TextEncoder().encode(content), "text/plain; charset=utf-8", 15 * 60);
+    const url = await exportR2.presign("GET", key, 60 * 30);
+    return json({ url, fileName, byteSize: content.length });
   }
 
   return json({ error: "Neznámá akce." }, 400);

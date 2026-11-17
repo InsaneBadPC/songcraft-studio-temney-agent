@@ -40,7 +40,7 @@ type Step = "format" | "mode" | "song" | "running";
 export default function VideosScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
-  const { isAuthenticated, loading } = useAuth();
+  const { isAuthenticated, loading, user } = useAuth();
   const snapshot = trpc.studio.snapshot.useQuery(undefined, { enabled: isAuthenticated });
 
   const [step, setStep] = useState<Step>("format");
@@ -74,13 +74,13 @@ useEffect(() => {
   const loadJobs = useCallback(async () => {
     try {
       setJobsError(null);
-      const next = await listVideoJobs(8);
+      const next = await listVideoJobs(user?.id, 8);
       jobsRef.current = next;
       setJobs(next);
     } catch (caught) {
       setJobsError(caught instanceof Error ? caught.message : "Render joby se nepodařilo načíst.");
     }
-  }, []);
+  }, [user?.id]);
 
   useEffect(() => {
     void loadJobs();
@@ -226,7 +226,7 @@ useEffect(() => {
 
   const downloadJob = useCallback(async (job: StudioVideoJob) => {
     try {
-      const url = await getVideoDownloadUrl(job);
+      const url = await getVideoDownloadUrl(user?.id, job);
       const song = songs.find((entry) => entry.id === job.songId);
       const fileName = `${(song?.title ?? "video").replace(/[^a-z0-9_-]/gi, "_")}-Temney.mp4`;
       const saved = await saveFinishedVideoToDownloads(url, fileName);
@@ -235,7 +235,7 @@ useEffect(() => {
     } catch (caught) {
       Alert.alert("Stažení selhalo", caught instanceof Error ? caught.message : "Zkus to prosím znovu.");
     }
-  }, [songs]);
+  }, [songs, user?.id]);
 
   if (loading || (isAuthenticated && snapshot.isLoading)) {
     return (

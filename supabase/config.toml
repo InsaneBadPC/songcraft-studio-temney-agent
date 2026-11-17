@@ -1,4 +1,4 @@
-project_id = "hfykngbhcxmnpxvjagoj"
+project_id = "eqgoedaydvwsuqgakpos"
 
 [api]
 enabled = true
@@ -59,3 +59,6 @@ verify_jwt = true
 
 [functions.songcraft-ai-settings]
 verify_jwt = true
+
+[functions.songcraft-media-store]
+verify_jwt = false

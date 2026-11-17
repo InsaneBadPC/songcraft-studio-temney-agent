@@ -8,6 +8,7 @@ import {
   privateAccessMessage,
 } from "../_shared/access.ts";
 import { describeRecipe, planMotion, visionProvider } from "./motion-recipe.ts";
+import { createR2Client, mediaKey } from "../_shared/r2.ts";
 import { PROVIDERS, resolveUserProvider } from "../_shared/llm-providers.ts";
 import {
   buildYoutubeDescription,
@@ -1037,13 +1038,23 @@ async function dispatch(
     if (bytes.byteLength <= 0 || bytes.byteLength > 10 * 1024 * 1024) {
       throw new Error("Vygenerovaný obal je neplatný nebo příliš velký.");
     }
-    const path = `${userId}/agent-artwork/${song.id}-${seed}.jpg`;
-    const { error: uploadError } = await admin.storage.from("songcraft").upload(
-      path,
-      bytes,
-      { contentType: "image/jpeg", upsert: false },
-    );
-    if (uploadError) throw new Error(uploadError.message);
+    const key = `${userId}/agent-artwork/${song.id}-${seed}.jpg`;
+    try {
+      const r2 = createR2Client();
+      await r2.putObject(key, bytes, "image/jpeg", 15 * 60);
+    } catch (error) {
+      throw new Error(error instanceof Error ? error.message : "Obal se nepodařilo uložit.");
+    }
+    const path = `r2://songcraft-studio/${key}`;
+    await admin.from("sc_media_objects").upsert({
+      user_id: userId,
+      storage_path: path,
+      kind: "cover",
+      byte_size: bytes.byteLength,
+      content_type: "image/jpeg",
+      original_file_name: `${song.id}-${seed}.jpg`,
+      state: "active",
+    }, { onConflict: "user_id,storage_path" });
     await admin.from("agent_image_assets").update({
       base_image_path: path,
       final_image_path: path,
@@ -1100,13 +1111,23 @@ async function dispatch(
     if (bytes.byteLength <= 0 || bytes.byteLength > 10 * 1024 * 1024) {
       throw new Error("Vygenerovaný obal je neplatný nebo příliš velký.");
     }
-    const path = `${userId}/agent-artwork/album-${album.id}-${seed}.jpg`;
-    const { error: uploadError } = await admin.storage.from("songcraft").upload(
-      path,
-      bytes,
-      { contentType: "image/jpeg", upsert: false },
-    );
-    if (uploadError) throw new Error(uploadError.message);
+    const key = `${userId}/agent-artwork/album-${album.id}-${seed}.jpg`;
+    try {
+      const r2 = createR2Client();
+      await r2.putObject(key, bytes, "image/jpeg", 15 * 60);
+    } catch (error) {
+      throw new Error(error instanceof Error ? error.message : "Obal alba se nepodařilo uložit.");
+    }
+    const path = `r2://songcraft-studio/${key}`;
+    await admin.from("sc_media_objects").upsert({
+      user_id: userId,
+      storage_path: path,
+      kind: "cover",
+      byte_size: bytes.byteLength,
+      content_type: "image/jpeg",
+      original_file_name: `album-${album.id}-${seed}.jpg`,
+      state: "active",
+    }, { onConflict: "user_id,storage_path" });
     const { error: updateAssetError } = await admin.from("agent_image_assets")
       .update({
         base_image_path: path,
@@ -1304,11 +1325,16 @@ async function dispatch(
     }
 
     // obal -> base64 pro vision
-    const art = await admin.storage.from("songcraft").download(song.cover_path);
-    if (art.error) {
-      throw new Error(`Obal se nepodařilo načíst: ${art.error.message}`);
+    const artKey = mediaKey(song.cover_path);
+    if (!artKey) throw new Error("Obal nemá platnou cestu.");
+    let art: Response;
+    try {
+      const r2 = createR2Client();
+      art = await r2.getObject(artKey, 15 * 60);
+    } catch (error) {
+      throw new Error(`Obal se nepodařilo načíst: ${error instanceof Error ? error.message : "neznámá chyba"}`);
     }
-    const bytes = new Uint8Array(await art.data.arrayBuffer());
+    const bytes = new Uint8Array(await art.arrayBuffer());
     if (!bytes.byteLength) throw new Error("Obal je prázdný.");
     if (bytes.byteLength > 6 * 1024 * 1024) {
       throw new Error("Obal je moc velký pro vision analýzu (max 6 MB).");

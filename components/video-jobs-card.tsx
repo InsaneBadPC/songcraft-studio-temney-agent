@@ -4,11 +4,14 @@ import { ActivityIndicator, Linking, Pressable, StyleSheet, Text, View } from "r
 
 import { formatDate } from "@/components/studio-ui";
 import { useColors } from "@/hooks/use-colors";
+import { useAuth } from "@/hooks/use-auth";
 import { getVideoDownloadUrl, listVideoJobs, type StudioVideoJob } from "@/lib/video-jobs";
 import { Radius, Type } from "@/lib/design-tokens";
 
 export function VideoJobsCard() {
   const colors = useColors();
+  const { user } = useAuth();
+  const userId = user?.id;
   const [jobs, setJobs] = useState<StudioVideoJob[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -16,13 +19,13 @@ export function VideoJobsCard() {
   const load = useCallback(async () => {
     try {
       setError(null);
-      setJobs(await listVideoJobs(5));
+      setJobs(await listVideoJobs(userId, 5));
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Render joby se nepodařilo načíst.");
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [userId]);
 
   useEffect(() => {
     void load();
@@ -43,7 +46,7 @@ export function VideoJobsCard() {
 
   async function openVideo(job: StudioVideoJob) {
     try {
-      await Linking.openURL(await getVideoDownloadUrl(job));
+      await Linking.openURL(await getVideoDownloadUrl(userId, job));
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Video se nepodařilo otevřít.");
     }

@@ -1,5 +1,15 @@
 import { useQueryClient } from "@tanstack/react-query";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  createContext,
+  createElement,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 
 import { clearUserClientData } from "@/lib/client-session-cleanup";
 import { supabase } from "@/lib/supabase";
@@ -13,21 +23,32 @@ export type SongCraftUser = {
   lastSignedIn: Date;
 };
 
-export function useAuth() {
+type AuthContextValue = {
+  user: SongCraftUser | null;
+  loading: boolean;
+  error: Error | null;
+  isAuthenticated: boolean;
+  refresh: () => Promise<void>;
+  logout: () => Promise<void>;
+};
+
+const AuthContext = createContext<AuthContextValue | null>(null);
+
+const mapUser = (source: { id: string; email?: string | null; user_metadata?: Record<string, unknown> } | null): SongCraftUser | null => source ? {
+  id: source.id,
+  openId: source.id,
+  name: typeof source.user_metadata?.display_name === "string" ? source.user_metadata.display_name : "Temney",
+  email: source.email ?? null,
+  loginMethod: "supabase",
+  lastSignedIn: new Date(),
+} : null;
+
+function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<SongCraftUser | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<Error | null>(null);
   const queryClient = useQueryClient();
   const previousUserIdRef = useRef<string | null>(null);
-
-  const mapUser = useCallback((source: { id: string; email?: string | null; user_metadata?: Record<string, unknown> } | null): SongCraftUser | null => source ? {
-    id: source.id,
-    openId: source.id,
-    name: typeof source.user_metadata?.display_name === "string" ? source.user_metadata.display_name : "Temney",
-    email: source.email ?? null,
-    loginMethod: "supabase",
-    lastSignedIn: new Date(),
-  } : null, []);
 
   const refresh = useCallback(async () => {
     setLoading(true);
@@ -35,7 +56,7 @@ export function useAuth() {
     setUser(mapUser(data.user));
     setError(authError ?? null);
     setLoading(false);
-  }, [mapUser]);
+  }, []);
 
   useEffect(() => {
     void refresh();
@@ -44,7 +65,7 @@ export function useAuth() {
       setLoading(false);
     });
     return () => data.subscription.unsubscribe();
-  }, [mapUser, refresh]);
+  }, [refresh]);
 
   // Auth state changes also cover token expiry and account switching, not only
   // the explicit logout button.
@@ -66,6 +87,32 @@ export function useAuth() {
     await clearUserClientData(queryClient, userId);
   }, [queryClient, user?.id]);
 
-  return { user, loading, error, isAuthenticated: useMemo(() => Boolean(user), [user]), refresh, logout };
+  const value = useMemo<AuthContextValue>(() => ({
+    user,
+    loading,
+    error,
+    isAuthenticated: Boolean(user),
+    refresh,
+    logout,
+  }), [user, loading, error, refresh, logout]);
+
+  return createElement(AuthContext.Provider, { value }, children);
 }
 
+/**
+ * Jeden sdílený stav přihlášení pro celou appku.
+ *
+ * Dřív to byla volitelná hooka: `useAuth()` se volalo na 16 místech a
+ * KAŽDÝ mount spustil vlastní `supabase.auth.getUser()` = 16 API requestů
+ * jen na otevření obrazovky. Provider si stav drží jednou a všem ho
+ * předá přes kontext - žádný call site se nemění.
+ */
+export function useAuth(): AuthContextValue {
+  const context = useContext(AuthContext);
+  if (!context) throw new Error("useAuth musí běžet pod AuthProviderem.");
+  return context;
+}
+
+export function AuthProviderRoot({ children }: { children: ReactNode }) {
+  return createElement(AuthProvider, null, children);
+}

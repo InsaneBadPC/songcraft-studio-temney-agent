@@ -8,6 +8,7 @@ import "react-native-reanimated";
 import { Platform } from "react-native";
 import "@/lib/_core/nativewind-pressable";
 import { ThemeProvider } from "@/lib/theme-provider";
+import { AuthProviderRoot } from "@/hooks/use-auth";
 import {
   SafeAreaFrameContext,
   SafeAreaInsetsContext,
@@ -60,12 +61,14 @@ export default function RootLayout() {
   const content = (
     <GestureHandlerRootView style={{ flex: 1 }}>
       <QueryClientProvider client={queryClient}>
-        <Stack screenOptions={{ headerShown: false }}>
-          <Stack.Screen name="(tabs)" />
-          <Stack.Screen name="auth" options={{ presentation: "fullScreenModal" }} />
-          <Stack.Screen name="service" />
-        </Stack>
-        <StatusBar style="auto" />
+        <AuthProviderRoot>
+          <Stack screenOptions={{ headerShown: false }}>
+            <Stack.Screen name="(tabs)" />
+            <Stack.Screen name="auth" options={{ presentation: "fullScreenModal" }} />
+            <Stack.Screen name="service" />
+          </Stack>
+          <StatusBar style="auto" />
+        </AuthProviderRoot>
       </QueryClientProvider>
     </GestureHandlerRootView>
   );

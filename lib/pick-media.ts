@@ -15,6 +15,8 @@ import { assetToArrayBuffer } from "./file-base64";
 
 export type PickedMedia = {
   bytes: ArrayBuffer;
+  /** Původní URI souboru - pro přímý PUT do media store (mimo Supabase). */
+  uri: string;
   fileName: string;
   mimeType: string;
   width?: number;
@@ -64,6 +66,7 @@ async function pick(kind: "images" | "videos"): Promise<PickedMedia | null> {
   const base = (asset.fileName ?? `soubor-${Date.now()}`).replace(/\.[a-z0-9]+$/i, "");
   return {
     bytes,
+    uri: asset.uri,
     fileName: `${base || "soubor"}.${extensionFor(declared, kind === "images" ? "jpg" : "mp4")}`,
     // typ overi serverova kontrola podle bajtu, tady jen nazev pro ulozeni
     mimeType: declared,

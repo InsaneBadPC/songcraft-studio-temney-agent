@@ -2,6 +2,7 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "jsr:@supabase/supabase-js@2";
 import { isAllowedPrivateUser, privateAccessMessage } from "../_shared/access.ts";
+import { createR2Client } from "../_shared/r2.ts";
 
 const cors = { "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type", "Access-Control-Allow-Methods": "POST, OPTIONS" };
 const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { ...cors, "Content-Type": "application/json" } });
@@ -118,9 +119,15 @@ Deno.serve(async (request) => {
 
     // Čtvercový formát: uložit rovnou.
     if (!youtubeCover) {
-      const path = `${user.id}/covers/generated/${input.entityType}-${safe(entityTitle)}-${crypto.randomUUID()}.${imageMime.includes("png") ? "png" : imageMime.includes("jpeg") ? "jpg" : "webp"}`;
-      const { error: uploadError } = await supabase.storage.from("songcraft").upload(path, imageBytes, { contentType: imageMime, upsert: false });
-      if (uploadError) return json({ status: "failed", error: uploadError.message });
+      const key = `${user.id}/covers/generated/${input.entityType}-${safe(entityTitle)}-${crypto.randomUUID()}.${imageMime.includes("png") ? "png" : imageMime.includes("jpeg") ? "jpg" : "webp"}`;
+      const path = `r2://songcraft-studio/${key}`;
+      try {
+        const r2 = createR2Client();
+        await r2.putObject(key, imageBytes, imageMime, 15 * 60);
+      } catch (error) {
+        return json({ status: "failed", error: `Obal se nepodařilo uložit: ${error instanceof Error ? error.message : "neznámá chyba"}` });
+      }
+      await admin.from("sc_media_objects").upsert({ user_id: user.id, storage_path: path, kind: "cover", byte_size: imageBytes.byteLength, content_type: imageMime, original_file_name: `${safe(entityTitle)}.${imageMime.includes("png") ? "png" : imageMime.includes("jpeg") ? "jpg" : "webp"}`, state: "active" }, { onConflict: "user_id,storage_path" });
       const coverError = await persistCover(input.entityType, input.entityId, path);
       if (coverError) return json({ status: "failed", error: coverError });
       return json({ status: "completed", coverPath: path });
@@ -130,9 +137,15 @@ Deno.serve(async (request) => {
     // removed from the active path because it exposed a public release asset.
     // The raw AI image is safe to crop in the client until the Oracle cover
     // composer is deployed; it is never published outside this user's bucket.
-    const rawPath = `${user.id}/covers/raw/${safe(entityTitle)}-${crypto.randomUUID()}.${imageMime.includes("png") ? "png" : imageMime.includes("jpeg") ? "jpg" : "webp"}`;
-    const { error: rawUploadError } = await supabase.storage.from("songcraft").upload(rawPath, imageBytes, { contentType: imageMime, upsert: false });
-    if (rawUploadError) return json({ status: "failed", error: rawUploadError.message });
+    const rawKey = `${user.id}/covers/raw/${safe(entityTitle)}-${crypto.randomUUID()}.${imageMime.includes("png") ? "png" : imageMime.includes("jpeg") ? "jpg" : "webp"}`;
+    const rawPath = `r2://${Deno.env.get("R2_BUCKET") || "songcraft-studio"}/${rawKey}`;
+    try {
+      const r2 = createR2Client();
+      await r2.putObject(rawKey, imageBytes, imageMime, 15 * 60);
+    } catch (error) {
+      return json({ status: "failed", error: `Obal se nepodařilo uložit: ${error instanceof Error ? error.message : "neznámá chyba"}` });
+    }
+    await admin.from("sc_media_objects").upsert({ user_id: user.id, storage_path: rawPath, kind: "cover", byte_size: imageBytes.byteLength, content_type: imageMime, original_file_name: `${safe(entityTitle)}.${imageMime.includes("png") ? "png" : imageMime.includes("jpeg") ? "jpg" : "webp"}`, state: "active" }, { onConflict: "user_id,storage_path" });
     const coverError = await persistCover(input.entityType, input.entityId, rawPath);
     if (coverError) return json({ status: "failed", error: coverError });
     await admin.from("sc_cover_jobs").upsert({ id: input.jobId, user_id: user.id, entity_type: input.entityType, entity_id: input.entityId, title: entityTitle, album_name: albumName, status: "completed", cover_path: rawPath, error: "16:9 composer pending; private source stored for safe crop.", updated_at: new Date().toISOString() });

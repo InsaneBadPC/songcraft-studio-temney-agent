@@ -32,15 +32,27 @@ function useStudioSnapshotQuery(_input?: undefined, options?: { enabled?: boolea
     queryKey: studioSnapshotQueryKey(user?.id),
     queryFn: getExternalStudioSnapshot,
     enabled: Boolean(user?.id) && (options?.enabled ?? true),
-    // Podepsané URL obrázků platí 24 h. Obnovit je dřív, než vyprší, a to
+    // Signed URL obrázků platí 45 minut. Obnovit je dřív, než vyprší, a to
     // i po návratu z pozadí, kde se focus event na Androidu nespustí.
-    refetchInterval: 60 * 60 * 1000,
+    refetchInterval: 45 * 60 * 1000,
     refetchOnWindowFocus: true,
+    // Bez staleTime se každý fokus okna refetchnul snapshot (= dva requesty
+    // na každou obrazovku). 5 minut znamená: data se obnoví jen když jsou
+    // fakt stará, uživatel přitom vidí aktuální data z cache.
+    staleTime: 5 * 60 * 1000,
   });
   useEffect(() => {
     if (Platform.OS === "web") return;
+    // Návrat do aplikace z pozadí: obnovíme jen když jsou data starší než
+    // staleTime. Dřív se invalidace volala vždy, takže každé otevření appky
+    // znamenalo nový snapshot (a dřív ~160 requestů).
     const subscription = AppState.addEventListener("change", (state) => {
-      if (state === "active") void queryClient.invalidateQueries({ queryKey: studioSnapshotQueryKey(user?.id) });
+      if (state !== "active") return;
+      const snapshot = queryClient.getQueryData(studioSnapshotQueryKey(user?.id));
+      const age = snapshot ? Date.now() - ((snapshot as { fetchedAt?: number }).fetchedAt ?? 0) : Number.POSITIVE_INFINITY;
+      if (!Number.isFinite(age) || age > 5 * 60 * 1000) {
+        void queryClient.invalidateQueries({ queryKey: studioSnapshotQueryKey(user?.id) });
+      }
     });
     return () => subscription.remove();
   }, [queryClient, user?.id]);
@@ -87,7 +99,7 @@ export const trpc = {
     completeDocument: { useMutation: () => useMutation({ mutationFn: ({ id }: { id: string | number }) => completeExternalDocument(String(id)) }) },
     createSong: { useMutation: () => useMutation({ mutationFn: (input: { title: string; albumId?: string | number | null; stylePrompt?: string | null; stylePrompts?: string[]; lyrics?: string | null; notes?: string | null; coverStorageKey?: string | null; coverUrl?: string | null }) => createExternalSong({ ...input, albumId: input.albumId === null || input.albumId === undefined ? null : String(input.albumId) }) }) },
     updateSong: { useMutation: () => useMutation({ mutationFn: (input: { id: string | number; title?: string; albumId?: string | number | null; stylePrompt?: string | null; stylePrompts?: string[]; lyrics?: string | null; notes?: string | null; coverStorageKey?: string | null; coverUrl?: string | null; youtubeDescription?: string | null; youtubeTags?: string | null }) => updateExternalSong({ ...input, id: String(input.id), albumId: normalizeOptionalId(input.albumId) }) }) },
-    upload: { useMutation: () => useMutation({ mutationFn: uploadToExternalStorage }) },
+    upload: { useMutation: () => useMutation({ mutationFn: (input: { folder: "covers" | "audio" | "videos" | "media"; fileName: string; contentType: string; base64?: string | null; bytes?: ArrayBuffer; sourceUri?: string | null }) => uploadToExternalStorage(input) }) },
     // --- Doprovodna media piskne (vice obrazku / videi pro video) ---
     addSongMedia: { useMutation: () => useMutation({ mutationFn: (input: { songId: string | number; kind: "image" | "video"; storageKey: string; originalFileName?: string | null; mimeType?: string | null; byteSize?: number }) => addExternalSongMedia({ ...input, songId: String(input.songId) }) }) },
     removeSongMedia: { useMutation: () => useMutation({ mutationFn: ({ id }: { id: string | number }) => removeExternalSongMedia(String(id)) }) },

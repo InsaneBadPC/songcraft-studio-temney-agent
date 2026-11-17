@@ -70,6 +70,7 @@ export default function SongDetailScreen() {
         fileName: pendingMp3.name,
         contentType: pendingMp3.mimeType ?? "audio/mpeg",
         bytes,
+        sourceUri: pendingMp3.uri,
       });
       const versionId = await createVersion.mutateAsync({
         songId,
@@ -105,7 +106,7 @@ export default function SongDetailScreen() {
       for (const [index, asset] of validAssets.entries()) {
         const label = `V${versions.length + index + 1}`;
         const bytes = await assetToArrayBuffer(asset.uri, asset.base64);
-        const uploaded = await upload.mutateAsync({ folder: "audio", fileName: asset.name, contentType: asset.mimeType ?? "audio/mpeg", bytes });
+        const uploaded = await upload.mutateAsync({ folder: "audio", fileName: asset.name, contentType: asset.mimeType ?? "audio/mpeg", bytes, sourceUri: asset.uri });
         const versionId = await createVersion.mutateAsync({ songId, label, originalFileName: uploaded.originalFileName, storageKey: uploaded.key, storageUrl: uploaded.url, mimeType: uploaded.mimeType, byteSize: uploaded.byteSize, id3Title: song.title, id3Artist: "Temney", id3Album: album?.name ?? null, id3TrackNumber: null, id3Year: album?.releaseYear ? String(album.releaseYear) : null, id3Genre: null, id3Comment: "Hromadný import", rating: 0, isPrimary: versions.length === 0 && index === 0 });
       }
       await utils.studio.snapshot.invalidate();

@@ -3,6 +3,7 @@ import { createClient } from "jsr:@supabase/supabase-js@2";
 import NodeID3 from "npm:node-id3";
 import { Buffer } from "node:buffer";
 import { isAllowedPrivateUser, privateAccessMessage } from "../_shared/access.ts";
+import { createR2Client, mediaKey } from "../_shared/r2.ts";
 
 const cors = {
   "Access-Control-Allow-Origin": "*",
@@ -17,8 +18,9 @@ const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
 const safeFileName = (name: string) => name.normalize("NFKC").replace(/[^a-zA-Z0-9._-]/g, "_").replace(/^[_.-]+/, "").replace(/_+/g, "_").slice(-180) || "songcraft-file";
 
 function ownedPath(userId: string, value: unknown): string | null {
-  if (typeof value !== "string" || !value || value.includes("\\") || value.includes("..") || value.startsWith("/") || value.includes("//")) return null;
-  return value === userId || value.startsWith(`${userId}/`) ? value : null;
+  const key = mediaKey(value);
+  if (!key) return null;
+  return key === userId || key.startsWith(`${userId}/`) ? key : null;
 }
 
 function validAudio(bytes: Uint8Array, mime: string | null) {
@@ -83,19 +85,32 @@ Deno.serve(async (request) => {
   // fallback is only for legacy rows and is still constrained to this tenant.
   const sourcePath = ownedPath(user.id, version.original_storage_path ?? version.storage_path);
   if (!sourcePath) return json({ error: "Původní MP3 nemá platnou cestu vlastníka." }, 409);
-  const { data: sourceBlob, error: sourceError } = await admin.storage.from("songcraft").download(sourcePath);
-  if (sourceError || !sourceBlob) return json({ error: "Původní MP3 se nepodařilo načíst." }, 502);
-  const source = new Uint8Array(await sourceBlob.arrayBuffer());
-  if (!validAudio(source, sourceBlob.type || version.mime_type)) return json({ error: "Soubor není platný podporovaný MP3/audio soubor." }, 415);
+  let r2: ReturnType<typeof createR2Client>;
+  try {
+    r2 = createR2Client();
+  } catch (error) {
+    return json({ error: `Media store není dostupný: ${error instanceof Error ? error.message : "neznámá chyba"}` }, 503);
+  }
+
+  let sourceResponse: Response;
+  try {
+    sourceResponse = await r2.getObject(sourcePath, 15 * 60);
+  } catch {
+    return json({ error: "Původní MP3 se nepodařilo načíst." }, 502);
+  }
+  const source = new Uint8Array(await sourceResponse.arrayBuffer());
+  if (!validAudio(source, sourceResponse.headers.get("content-type") || version.mime_type)) return json({ error: "Soubor není platný podporovaný MP3/audio soubor." }, 415);
 
   let image: { mime: string; type: { id: number }; description: string; imageBuffer: Buffer } | undefined;
   const coverPath = ownedPath(user.id, song.cover_path ?? album?.cover_path);
   if (coverPath) {
-    const { data: coverBlob } = await admin.storage.from("songcraft").download(coverPath);
-    if (coverBlob) {
-      const coverBytes = new Uint8Array(await coverBlob.arrayBuffer());
-      const mime = coverBlob.type || (coverBytes[0] === 0x89 ? "image/png" : coverBytes[0] === 0xff ? "image/jpeg" : "image/webp");
+    try {
+      const coverResponse = await r2.getObject(coverPath, 15 * 60);
+      const coverBytes = new Uint8Array(await coverResponse.arrayBuffer());
+      const mime = coverResponse.headers.get("content-type") || (coverBytes[0] === 0x89 ? "image/png" : coverBytes[0] === 0xff ? "image/jpeg" : "image/webp");
       if (validImage(coverBytes, mime)) image = { mime, type: { id: mime === "image/png" ? 3 : mime === "image/jpeg" ? 3 : 6 }, description: "SongCraft cover", imageBuffer: Buffer.from(coverBytes) };
+    } catch {
+      image = undefined;
     }
   }
 
@@ -113,9 +128,23 @@ Deno.serve(async (request) => {
   if (!Buffer.isBuffer(tagged)) return json({ error: "ID3 tagy se nepodařilo vložit do MP3." }, 500);
 
   const baseName = safeFileName(`Temney - ${song.title}${album?.name ? ` - ${album.name}` : ""} - ${label}`).replace(/\.mp3$/i, "");
-  const targetPath = `${user.id}/audio/tagged/${crypto.randomUUID()}-${baseName}.mp3`;
-  const { error: uploadError } = await admin.storage.from("songcraft").upload(targetPath, tagged, { contentType: "audio/mpeg", upsert: false });
-  if (uploadError) return json({ error: "Hotovou MP3 kopii se nepodařilo uložit." }, 502);
+  const targetKey = `${user.id}/audio/tagged/${crypto.randomUUID()}-${baseName}.mp3`;
+  try {
+    await r2.putObject(targetKey, tagged, "audio/mpeg", 15 * 60);
+  } catch {
+    return json({ error: "Hotovou MP3 kopii se nepodařilo uložit." }, 502);
+  }
+  const targetPath = `r2://${Deno.env.get("R2_BUCKET") || "songcraft-studio"}/${targetKey}`;
+  await admin.from("sc_media_objects").upsert({
+    user_id: user.id,
+    storage_path: targetPath,
+    kind: "audio",
+    byte_size: tagged.byteLength,
+    content_type: "audio/mpeg",
+    original_file_name: `${baseName}.mp3`,
+    state: "active",
+  }, { onConflict: "user_id,storage_path" });
+  await admin.from("sc_metering_events").insert({ user_id: user.id, kind: "upload", byte_size: tagged.byteLength, storage_path: targetPath });
 
   const { error: updateError } = await admin
     .from("sc_audio_versions")
