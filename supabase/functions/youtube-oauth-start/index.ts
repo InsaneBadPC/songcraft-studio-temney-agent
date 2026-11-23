@@ -28,9 +28,15 @@ Deno.serve(async (request) => {
   const anonKey = Deno.env.get("SUPABASE_ANON_KEY") || Deno.env.get("SONGCRAFT_SUPABASE_ANON_KEY");
   const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || Deno.env.get("SONGCRAFT_SERVICE_ROLE_KEY");
   const clientId = Deno.env.get("YOUTUBE_CLIENT_ID");
-  const redirectUri = Deno.env.get("YOUTUBE_REDIRECT_URI");
-  if (!url || !anonKey || !serviceKey || !clientId || !redirectUri) return json({ error: "YouTube OAuth není nakonfigurováno." }, 503);
+  const serverRedirectUri = Deno.env.get("YOUTUBE_REDIRECT_URI");
+  const loopbackRedirectUri = Deno.env.get("YOUTUBE_LOOPBACK_REDIRECT_URI") || "http://localhost";
+  if (!url || !anonKey || !serviceKey || !clientId || !serverRedirectUri) return json({ error: "YouTube OAuth není nakonfigurováno." }, 503);
   if (!authorization) return json({ error: "Chybí přihlášení." }, 401);
+  const body = await request.json().catch(() => ({} as Record<string, unknown>));
+  const requestedRedirectUri = typeof body.redirectUri === "string" ? body.redirectUri : loopbackRedirectUri;
+  const allowedRedirects = new Set([loopbackRedirectUri, "http://localhost", "http://127.0.0.1", serverRedirectUri]);
+  if (!allowedRedirects.has(requestedRedirectUri)) return json({ error: "Nepovolená přesměrovací adresa pro YouTube OAuth." }, 400);
+  const redirectUri = requestedRedirectUri;
 
   const auth = createClient(url, anonKey, { global: { headers: { Authorization: authorization } } });
   const { data: { user }, error: authError } = await auth.auth.getUser();

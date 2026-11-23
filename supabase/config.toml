@@ -45,6 +45,9 @@ verify_jwt = true
 [functions.youtube-oauth-start]
 verify_jwt = true
 
+[functions.youtube-oauth-exchange]
+verify_jwt = true
+
 [functions.youtube-oauth-callback]
 verify_jwt = false
 
