@@ -25,17 +25,22 @@ export default function TextsScreen() {
   const { album: albumParam } = useLocalSearchParams<{ album?: string | string[] }>();
   const albumFromQuery = firstQueryParam(albumParam);
   const [search, setSearch] = useState("");
+  const [statusFilter, setStatusFilter] = useState<"draft" | "archived">("draft");
   const [albumId, setAlbumId] = useState<string | null>(albumFromQuery);
   useEffect(() => { setAlbumId(albumFromQuery); }, [albumFromQuery]);
   const snapshot = trpc.studio.snapshot.useQuery(undefined, { enabled: isAuthenticated });
   const [refreshing, setRefreshing] = useState(false);
   const onRefresh = useCallback(async () => { setRefreshing(true); Haptics.selectionAsync().catch(()=>{}); await snapshot.refetch(); setRefreshing(false); }, [snapshot]);
 
-  const drafts = useMemo(() => (snapshot.data?.documents ?? []).filter((d) => d.status === "draft"), [snapshot.data?.documents]);
-  const records = useMemo(() => drafts.filter((d) => {
+  const documents = useMemo(() => {
+    const all = snapshot.data?.documents ?? [];
+    if (statusFilter === "archived") return all.filter((d) => d.status === "archived");
+    return all.filter((d) => d.status === "draft");
+  }, [snapshot.data?.documents, statusFilter]);
+  const records = useMemo(() => documents.filter((d) => {
     if (albumId && d.albumId !== albumId) return false;
     return `${d.title} ${d.lyrics ?? ""} ${d.stylePrompt ?? ""}`.toLowerCase().includes(search.toLowerCase());
-  }), [albumId, search, drafts]);
+  }), [albumId, search, documents]);
 
   if (loading || (isAuthenticated && snapshot.isLoading)) {
     return <ScreenContainer className="px-5"><View style={{ paddingTop: 14, gap: 12 }}><Shimmer height={36} radius={16} /><Shimmer height={48} radius={16} /><View style={{ gap: 10, marginTop: 12 }}>{[1,2,3].map(i=> <View key={i} style={[styles.row, { backgroundColor: colors.surface, borderColor: colors.border }]}><Shimmer width={60} height={60} radius={16} /><View style={{ flex:1, gap:8 }}><Shimmer height={14} width="60%" /><Shimmer height={12} width="80%" /></View></View>)}</View></View></ScreenContainer>;
@@ -64,9 +69,16 @@ export default function TextsScreen() {
               {snapshot.data?.albums.map((album) => <FilterChip key={album.id} active={albumId===album.id} label={album.name} onPress={() => { Haptics.selectionAsync().catch(()=>{}); setAlbumId(album.id); }} />)}
             </ScrollView>
           </View>
+          <View style={styles.filterGroup}>
+            <Text style={[styles.filterLabel, { color: colors.muted }]}>STAV</Text>
+            <View style={styles.filters}>
+              <FilterChip active={statusFilter === "draft"} label="Rozpracované" onPress={() => { Haptics.selectionAsync().catch(()=>{}); setStatusFilter("draft"); }} />
+              <FilterChip active={statusFilter === "archived"} label="Archivováno" onPress={() => { Haptics.selectionAsync().catch(()=>{}); setStatusFilter("archived"); }} />
+            </View>
+          </View>
           <View style={styles.countRow}>
-            <Text style={[styles.countText, { color: colors.foreground }]}>{records.length} {records.length===1 ? "koncept" : records.length<5 ? "koncepty" : "konceptů"}</Text>
-            <Text style={[styles.countSub, { color: colors.muted }]}>jen rozepsané • po dokončení přesun do Knihovny</Text>
+            <Text style={[styles.countText, { color: colors.foreground }]}>{records.length} {statusFilter === "archived" ? (records.length===1 ? "text" : records.length>=2 && records.length<=4 ? "texty" : "textů") : (records.length===1 ? "koncept" : records.length<5 ? "koncepty" : "konceptů")}</Text>
+            <Text style={[styles.countSub, { color: colors.muted }]}>{statusFilter === "archived" ? "archivované texty • obnovení v editoru" : "jen rozepsané • po dokončení přesun do Knihovny"}</Text>
           </View>
         </>}
         renderItem={({ item, index }) => {
@@ -79,9 +91,12 @@ export default function TextsScreen() {
                 {album?.coverUrl ? <View style={[styles.albumBadge, { borderColor: colors.background, backgroundColor: colors.surface }]}><CoverArt uri={album.coverUrl} title={album.name} size={26} /></View> : null}
               </View>
               <View style={styles.copy}>
-                <View style={styles.copyTop}><Text numberOfLines={2} style={[styles.name, { color: colors.foreground }]}>{item.title}</Text><StatusChip state={item.status} /></View>
+                <View style={styles.copyTop}>
+                  <Text style={[styles.name, { color: colors.foreground }]}>{item.title}</Text>
+                  <StatusChip state={item.status} />
+                </View>
                 <View style={styles.phaseRow}>
-                  <View style={[styles.phaseChip, { backgroundColor: "rgba(148,163,184,0.10)", borderColor: "rgba(148,163,184,0.20)" }]}><MaterialIcons name="edit-note" size={12} color={colors.muted} /><Text style={[styles.phaseText, { color: colors.muted }]}>Rozpracovaný koncept</Text></View>
+                  <View style={[styles.phaseChip, { backgroundColor: "rgba(148,163,184,0.10)", borderColor: "rgba(148,163,184,0.20)" }]}><MaterialIcons name="edit-note" size={12} color={colors.muted} /><Text style={[styles.phaseText, { color: colors.muted }]}>{item.status === "archived" ? "Archivováno" : "Rozpracovaný koncept"}</Text></View>
                   {album ? <View style={[styles.phaseChip, { backgroundColor: "rgba(255,255,255,0.06)", borderColor: "rgba(255,255,255,0.08)" }]}><MaterialIcons name="album" size={11} color={colors.muted} /><Text style={[styles.phaseText, { color: colors.muted }]}>{album.name}</Text></View> : null}
                 </View>
                 <Text numberOfLines={2} style={[styles.details, { color: colors.muted }]}>{item.lyrics?.trim() ? item.lyrics.trim().replace(/\n+/g," · ") : "Zatím bez textu"}</Text>
@@ -91,7 +106,7 @@ export default function TextsScreen() {
             </Pressable>
           </Animated.View>
         )}}
-        ListEmptyComponent={<EmptyState icon="description" title={search ? "Žádná shoda" : "Žádné rozepsané koncepty"} text={search ? "Zkus změnit hledaný výraz nebo filtr alba." : "Založ nový koncept. Až bude hotový, označ ho dole v editoru a přesune se do Knihovny."} />}
+        ListEmptyComponent={<EmptyState icon="description" title={search ? "Žádná shoda" : statusFilter === "archived" ? "Žádné archivované texty" : "Žádné rozepsané koncepty"} text={search ? "Zkus změnit hledaný výraz nebo filtr alba." : statusFilter === "archived" ? "Archivované texty se sem přesouvají z editoru. Zatím tu žádné nejsou." : "Založ nový koncept. Až bude hotový, označ ho dole v editoru a přesune se do Knihovny."} />}
       />
       <View style={[styles.bottomBar, { paddingBottom: insets.bottom+12, backgroundColor: colors.background, borderTopColor: "rgba(255,255,255,0.06)" }]}>
         <Pressable onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(()=>{}); router.push("/text/new" as never); }} style={({ pressed }) => [styles.bottomCta, { transform:[{scale: pressed?0.97:1}] }]}>
@@ -124,7 +139,7 @@ const styles = StyleSheet.create({
   albumBadge: { position: "absolute", bottom: -4, right: -6, width: 30, height: 30, borderRadius: Radius.sm, borderWidth: 2, overflow: "hidden", alignItems: "center", justifyContent: "center" },
   copy: { flex: 1, gap: 4 },
   copyTop: { flexDirection: "row", gap: 8, alignItems: "center", justifyContent: "space-between" },
-  name: { flex: 1, fontSize: 15, fontWeight: "700", letterSpacing: -0.2, lineHeight: 19 },
+  name: { flex: 1, minWidth: 0, fontSize: 15, fontWeight: "700", letterSpacing: -0.2, lineHeight: 19 },
   phaseRow: { flexDirection: "row", gap: 6, flexWrap: "wrap" },
   phaseChip: { flexDirection: "row", alignItems: "center", gap: 4, paddingHorizontal: 7, height: 20, borderRadius: Radius.sm, borderWidth: 1 },
   phaseText: { ...Type.overline, letterSpacing: 0.2 },

@@ -15,6 +15,7 @@ import { useColors } from "@/hooks/use-colors";
 import { trpc } from "@/lib/trpc";
 import { Radius, Type } from "@/lib/design-tokens";
 import { scrollIndicator } from "@/lib/scroll";
+import { shortsState } from "@/lib/shorts";
 
 export default function LibraryScreen() {
   const colors = useColors();
@@ -136,6 +137,8 @@ export default function LibraryScreen() {
           const finalVersion = songVersions.find((v) => v.isFinal);
           const album = snapshot.data?.albums.find((a) => a.id === item.albumId);
           const isPublished = (item as any).isPublished;
+          const shorts = snapshot.data ? shortsState(snapshot.data, item.id) : "none";
+          const shortsTone = shorts === "published" ? colors.success : colors.primary;
           return (
             <Animated.View entering={FadeInDown.delay(index * 40).duration(420)} layout={Layout.springify()}>
               <Pressable onPress={() => { Haptics.selectionAsync().catch(()=>{}); router.push(`/song/${item.id}` as never); }} style={({ pressed }) => [styles.row, { backgroundColor: colors.surface, borderColor: "rgba(255,255,255,0.08)", shadowColor: "#000", shadowOpacity: pressed ? 0.2 : 0.12, shadowRadius: pressed ? 8 : 16, shadowOffset: { width: 0, height: pressed ? 4 : 8 }, elevation: 6, opacity: pressed ? 0.96 : 1, transform: [{ scale: pressed ? 0.98 : 1 }] }]}>
@@ -164,6 +167,12 @@ export default function LibraryScreen() {
                       <View style={[styles.badge, { backgroundColor: "rgba(0,217,236,0.12)", borderColor: "rgba(0,217,236,0.22)" }]}>
                         <MaterialIcons name="public" size={12} color={colors.primary} />
                         <Text style={[styles.badgeText, { color: colors.primary }]}>YouTube</Text>
+                      </View>
+                    )}
+                    {shorts !== "none" && (
+                      <View style={[styles.badge, { backgroundColor: `${shortsTone}1F`, borderColor: `${shortsTone}38` }]}>
+                        <MaterialIcons name="smart-display" size={12} color={shortsTone} />
+                        <Text style={[styles.badgeText, { color: shortsTone }]}>SHORTS</Text>
                       </View>
                     )}
                   </View>

@@ -353,12 +353,13 @@ export function SectionTitle({ title, right }: { title: string; right?: ReactNod
   );
 }
 
-export function StatusChip({ state }: { state: "draft" | "complete" | "cloud" }) {
+export function StatusChip({ state }: { state: "draft" | "complete" | "cloud" | "archived" }) {
   const colors = useColors();
   const complete = state === "complete" || state === "cloud";
   const draft = state === "draft";
-  const tone = complete ? colors.success : draft ? colors.muted : colors.primary;
-  const label = draft ? "ROZPRACOVÁNO" : state === "complete" ? "HOTOVO" : "CLOUD";
+  const archived = state === "archived";
+  const tone = complete ? colors.success : draft || archived ? colors.muted : colors.primary;
+  const label = archived ? "ARCHIVOVÁNO" : draft ? "ROZPRACOVÁNO" : state === "complete" ? "HOTOVO" : "CLOUD";
   return (
     <View style={[styles.statusChip, { backgroundColor: alpha(tone, 0.12), borderColor: alpha(tone, 0.28) }]}>
       <View style={[styles.statusDot, { backgroundColor: tone }]} />

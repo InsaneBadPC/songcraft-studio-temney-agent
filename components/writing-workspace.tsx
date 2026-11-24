@@ -181,7 +181,7 @@ export function WritingWorkspace({
     setToolsOpen(false);
   };
 
-  const statusLabel = status === "complete" ? "Hotová skladba" : "Rozpracovaný koncept";
+  const statusLabel = status === "complete" ? "Hotová skladba" : status === "archived" ? "Archivovaný text" : "Rozpracovaný koncept";
 
   return (
     <ScreenContainer edges={["top", "bottom", "left", "right"]}>
@@ -264,7 +264,7 @@ export function WritingWorkspace({
               <ToolButton icon="build" label="Nástroje" onPress={() => setToolsOpen(true)} colors={colors} />
               <ToolButton icon="delete-outline" label="Vymazat" tone="danger" disabled={!active.value} onPress={clearText} colors={colors} />
             </View>
-            {mode === "lyrics" && status !== "complete" && onComplete ? (
+            {mode === "lyrics" && status !== "complete" && status !== "archived" && onComplete ? (
               <Pressable
                 accessibilityRole="button"
                 accessibilityLabel="Označit jako hotové"

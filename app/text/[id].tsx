@@ -34,6 +34,8 @@ export default function TextEditorScreen() {
   const create = trpc.studio.createDocument.useMutation();
   const update = trpc.studio.updateDocument.useMutation();
   const complete = trpc.studio.completeDocument.useMutation();
+  const archive = trpc.studio.archiveDocument.useMutation();
+  const restore = trpc.studio.restoreDocument.useMutation();
   const createCoverGeneration = trpc.studio.createCoverGeneration.useMutation();
   const checkCoverGeneration = trpc.studio.checkCoverGeneration.useMutation();
   const [coverGenerating, setCoverGenerating] = useState(false);
@@ -146,6 +148,18 @@ export default function TextEditorScreen() {
       Alert.alert("Hotový text je v Knihovně", "Koncept byl označen jako hotový a přesunut do Knihovny, kde můžeš nahrát MP3, video a další média.", [{ text: "Otevřít knihovnu", onPress: () => router.replace("/(tabs)/library" as never) }, { text: "Zpět na texty", onPress: () => router.replace("/(tabs)/texts" as never) }]);
     } catch (error) { Alert.alert("Změna stavu se nezdařila", error instanceof Error ? error.message : "Zkus to znovu."); }
   };
+  const changeStatus = async (next: "archived" | "draft") => {
+    if (!id) return;
+    const saved = await save();
+    if (!saved) return;
+    try {
+      if (next === "archived") await archive.mutateAsync({ id: saved });
+      else await restore.mutateAsync({ id: saved });
+      await clearDraft(id ?? null, userId, "text");
+      await utils.studio.snapshot.invalidate();
+      router.replace("/(tabs)/texts" as never);
+    } catch (error) { Alert.alert("Změna stavu se nezdařila", error instanceof Error ? error.message : "Zkus to znovu."); }
+  };
   const updateLyrics = (lyrics: string, coalesce = true) => {
     lyricsHistory.change(lyrics, coalesce);
     setForm((current) => ({ ...current, lyrics }));
@@ -182,7 +196,7 @@ export default function TextEditorScreen() {
         completing={complete.isPending}
         onClose={() => setWorkspaceOpen(false)}
         onSave={async () => { const saved = await save(); if (saved) setWorkspaceOpen(false); }}
-        onComplete={async () => { setWorkspaceOpen(false); await markComplete(); }}
+        onComplete={document?.status === "archived" ? undefined : async () => { setWorkspaceOpen(false); await markComplete(); }}
       />
     );
   }
@@ -197,7 +211,18 @@ export default function TextEditorScreen() {
     <WritingCard icon="tune" label="Prompt stylu pro hudební generátor" helper="Žánr, tempo, nálada, nástroje, hlas…" value={form.stylePrompt} placeholder="Zatím prázdný. Otevři editor a napiš, jak má skladba znít." onPress={() => { setWorkspaceMode("prompt"); setWorkspaceOpen(true); }} />
     <WritingCard icon="edit-note" label="Text písně" helper="Sloky, refrén, bridge…" value={lyricsHistory.value} placeholder="Zatím prázdný text. Otevři editor a začni psát." lines={5} onPress={() => { setWorkspaceMode("lyrics"); setWorkspaceOpen(true); }} />
     <Field label="Poznámky k produkci" value={form.notes} onChangeText={(notes) => setForm((current) => ({ ...current, notes }))} placeholder="Aranž, reference, nápady na klip…" multiline />
-    <View style={[styles.completeBox, { backgroundColor: `${colors.success}16`, borderColor: `${colors.success}55` }]}><MaterialIcons name="check-circle" size={23} color={colors.success} /><View style={styles.completeCopy}><Text style={[styles.completeTitle, { color: colors.foreground }]}>{document?.status === "complete" ? "Hotový text je v Knihovně" : "Koncept je připravený?"}</Text><Text style={[styles.completeText, { color: colors.muted }]}>{document?.status === "complete" ? "Tahle skladba už je hotová. Uprav ji v Knihovně, kde můžeš nahrát MP3, video a obrázky." : "Označením jako hotové se koncept přesune z Textů do Knihovny, kde k němu přidáš MP3, video a další média."}</Text></View></View>{document?.status === "complete" ? <PrimaryButton label="Otevřít v Knihovně" icon="library-music" onPress={() => router.replace("/(tabs)/library" as never)} /> : <PrimaryButton label="Označit jako hotové" icon="task-alt" onPress={() => void markComplete()} disabled={saving || complete.isPending} />}
+    {document?.status === "archived" ? (
+      <>
+        <View style={[styles.completeBox, { backgroundColor: `${colors.muted}16`, borderColor: `${colors.muted}55` }]}><MaterialIcons name="archive" size={23} color={colors.muted} /><View style={styles.completeCopy}><Text style={[styles.completeTitle, { color: colors.foreground }]}>Archivovaný text</Text><Text style={[styles.completeText, { color: colors.muted }]}>Text je uložený v archivu. Obnovením se vrátí mezi rozpracované koncepty.</Text></View></View>
+        <PrimaryButton label="Obnovit do rozpracovaných" icon="restore" onPress={() => Alert.alert("Obnovit text?", "Text se vrátí mezi rozpracované koncepty v Textech.", [{ text: "Zrušit", style: "cancel" }, { text: "Obnovit", onPress: () => void changeStatus("draft") }])} disabled={saving || archive.isPending || restore.isPending} />
+      </>
+    ) : (
+      <>
+        <View style={[styles.completeBox, { backgroundColor: `${colors.success}16`, borderColor: `${colors.success}55` }]}><MaterialIcons name="check-circle" size={23} color={colors.success} /><View style={styles.completeCopy}><Text style={[styles.completeTitle, { color: colors.foreground }]}>{document?.status === "complete" ? "Hotový text je v Knihovně" : "Koncept je připravený?"}</Text><Text style={[styles.completeText, { color: colors.muted }]}>{document?.status === "complete" ? "Tahle skladba už je hotová. Uprav ji v Knihovně, kde můžeš nahrát MP3, video a obrázky." : "Označením jako hotové se koncept přesune z Textů do Knihovny, kde k němu přidáš MP3, video a další média."}</Text></View></View>
+        {document?.status === "draft" ? <PrimaryButton label="Archivovat" icon="archive" onPress={() => Alert.alert("Archivovat text?", "Text se přesune do filtru Archivováno. Odtud ho můžeš obnovit.", [{ text: "Zrušit", style: "cancel" }, { text: "Archivovat", onPress: () => void changeStatus("archived") }])} disabled={saving || archive.isPending || restore.isPending} /> : null}
+        {document?.status === "complete" ? <PrimaryButton label="Otevřít v Knihovně" icon="library-music" onPress={() => router.replace("/(tabs)/library" as never)} /> : <PrimaryButton label="Označit jako hotové" icon="task-alt" onPress={() => void markComplete()} disabled={saving || complete.isPending || archive.isPending || restore.isPending} />}
+      </>
+    )}
    </ScrollView></KeyboardAvoidingView></ScreenContainer>;
 }
 
